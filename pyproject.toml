@@ -10,4 +10,5 @@ dependencies = [
     "opacus",
     "tabulate",
     "numpy",
+    "python-dotenv",
 ]

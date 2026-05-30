@@ -22,6 +22,7 @@ import json
 import random
 import numpy as np
 import torch
+from dotenv import load_dotenv
 from torch.utils.data import Dataset, DataLoader
 from transformers import (
     AutoTokenizer,
@@ -38,28 +39,30 @@ from email.utils import parseaddr
 import warnings
 warnings.filterwarnings("ignore")
 
+load_dotenv()
+
 # ============================================================
 # Configuration
 # ============================================================
 CONFIG = {
-    "model_name": "EleutherAI/gpt-neo-1.3B",
-    "max_length": 256,
-    "batch_size": 16,
-    "epochs": 3,
-    "learning_rate": 5e-5,
-    "max_grad_norm": 1.0,
+    "model_name": os.getenv("MODEL_NAME", "EleutherAI/gpt-neo-1.3B"),
+    "max_length": int(os.getenv("MAX_LENGTH", 256)),
+    "batch_size": int(os.getenv("BATCH_SIZE", 16)),
+    "epochs": int(os.getenv("EPOCHS", 3)),
+    "learning_rate": float(os.getenv("LEARNING_RATE", 5e-5)),
+    "max_grad_norm": float(os.getenv("MAX_GRAD_NORM", 1.0)),
     "noise_levels": [0, 0.0001, 0.0005, 0.002, 0.005],
     "num_attack_samples": 100,
-    "seed": 42,
+    "seed": int(os.getenv("SEED", 42)),
     "device": "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu",
-    "data_dir": "enron_data",
-    "output_dir": "results",
-    "max_emails": 50000,
-    "subset_pairs": 3238,
+    "data_dir": os.getenv("DATA_DIR", "enron_data"),
+    "output_dir": os.getenv("OUTPUT_DIR", "results"),
+    "max_emails": int(os.getenv("MAX_EMAILS", 50000)),
+    "subset_pairs": int(os.getenv("SUBSET_PAIRS", 3238)),
     # QLoRA
-    "lora_r": 16,
-    "lora_alpha": 32,
-    "lora_dropout": 0.05,
+    "lora_r": int(os.getenv("LORA_R", 16)),
+    "lora_alpha": int(os.getenv("LORA_ALPHA", 32)),
+    "lora_dropout": float(os.getenv("LORA_DROPOUT", 0.05)),
     "lora_target_modules": ["q_proj", "v_proj"],  # GPT-Neo attention projections
     "use_4bit": torch.cuda.is_available(),  # 4-bit quantization requires CUDA
 }
