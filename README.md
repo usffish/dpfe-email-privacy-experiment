@@ -90,11 +90,11 @@ If the data is not present, the script will automatically generate a synthetic d
 
 ## Installation
 
-```bash
-pip install torch transformers peft bitsandbytes opacus tabulate numpy
-```
-
 Requires Python ≥ 3.11.
+
+```bash
+pip install -r requirements.txt
+```
 
 - **CUDA GPU** — required for 4-bit quantization (`bitsandbytes`). Runs the full QLoRA pipeline.
 - **Apple MPS / CPU** — automatically falls back to full-precision LoRA (no quantization). Slower but functional.
@@ -116,22 +116,24 @@ The script will:
 
 ### Configuration
 
-All hyperparameters are in the `CONFIG` dictionary at the top of `main.py`:
+All hyperparameters can be set in `.env` (copy from the table below). The file is gitignored so values stay local.
 
-| Parameter | Default | Description |
+| `.env` key | Default | Description |
 |---|---|---|
-| `model_name` | `EleutherAI/gpt-neo-1.3B` | HuggingFace model ID |
-| `batch_size` | 16 | Training batch size |
-| `epochs` | 3 | Fine-tuning epochs |
-| `learning_rate` | 5e-5 | AdamW learning rate |
-| `max_grad_norm` | 1.0 | Gradient clipping (required for DP-SGD) |
-| `noise_levels` | [0, 0.0001, 0.0005, 0.002, 0.005] | DP-SGD noise multipliers σ |
-| `max_emails` | 50,000 | Training corpus size |
-| `subset_pairs` | 3,238 | Attack evaluation pairs |
-| `lora_r` | 16 | LoRA rank |
-| `lora_alpha` | 32 | LoRA scaling factor |
-| `lora_target_modules` | `["q_proj", "v_proj"]` | Attention layers to inject LoRA into |
-| `use_4bit` | `True` (if CUDA) | Enable 4-bit NF4 quantization |
+| `MODEL_NAME` | `EleutherAI/gpt-neo-1.3B` | HuggingFace model ID |
+| `BATCH_SIZE` | `16` | Training batch size |
+| `EPOCHS` | `3` | Fine-tuning epochs |
+| `LEARNING_RATE` | `5e-5` | AdamW learning rate |
+| `MAX_GRAD_NORM` | `1.0` | Gradient clipping (required for DP-SGD) |
+| `MAX_EMAILS` | `50000` | Training corpus size |
+| `SUBSET_PAIRS` | `3238` | Attack evaluation pairs |
+| `MAX_LENGTH` | `256` | Token sequence length |
+| `SEED` | `42` | Random seed |
+| `LORA_R` | `16` | LoRA rank |
+| `LORA_ALPHA` | `32` | LoRA scaling factor |
+| `DATA_DIR` | `enron_data` | Path to email corpus |
+| `OUTPUT_DIR` | `results` | Path for output files |
+| `HF_HOME` | *(system default)* | HuggingFace cache dir (set to scratch on CIRCE) |
 
 ---
 
@@ -203,7 +205,9 @@ Check status with `squeue -u ${USER}`. Logs are written to `logs/<job_id>.out`.
 ├── main.py               # Full experiment pipeline
 ├── download_model.py     # Pre-download model weights (run on login node)
 ├── run.sbatch            # SLURM submission script for CIRCE
-├── pyproject.toml        # Project metadata and dependencies
+├── requirements.txt      # Python dependencies
+├── pyproject.toml        # Project metadata
+├── .env                  # Local config (gitignored)
 ├── enron_data/           # Email corpus (not tracked)
 └── results/              # Output tables (not tracked)
 ```
