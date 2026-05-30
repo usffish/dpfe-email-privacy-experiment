@@ -1,5 +1,13 @@
 [project]
-name = "independent-project"
+name = "dpfe-email-privacy-experiment"
 version = "0.1.0"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "torch",
+    "transformers",
+    "peft",
+    "bitsandbytes",
+    "opacus",
+    "tabulate",
+    "numpy",
+]

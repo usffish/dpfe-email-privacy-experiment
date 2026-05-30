@@ -50,12 +50,20 @@ The DPFE framework (from the companion paper) fine-tunes foundation models using
 | Property | Value |
 |---|---|
 | Model | [EleutherAI/gpt-neo-1.3B](https://huggingface.co/EleutherAI/gpt-neo-1.3B) |
-| Parameters | 1.3 billion |
+| Parameters | 1.3 billion (base) |
 | Architecture | Autoregressive transformer (GPT-style) |
 | Pre-training data | The Pile (800GB, includes ENRON corpus) |
-| Fine-tuning task | Causal language modeling on email bodies |
+| Fine-tuning method | **QLoRA** — 4-bit NF4 quantized base + LoRA adapters |
+| Trainable parameters | ~4M (LoRA adapters on `q_proj` / `v_proj` only) |
 
-GPT-Neo 1.3B is larger and newer than GPT-2 Medium (355M, 2019) and is the same model family evaluated in Huang et al. (2022).
+### Why QLoRA?
+
+QLoRA (Dettmers et al., 2023) combines two techniques:
+
+- **4-bit NF4 quantization** (`bitsandbytes`) — the 1.3B base model is loaded in 4-bit, reducing memory from ~5GB to ~1GB. The base weights are frozen.
+- **LoRA adapters** (`peft`) — small rank-16 adapter matrices are injected into the attention layers. Only these ~4M parameters are updated during fine-tuning.
+
+This matters critically for the DP-SGD privacy mechanism: **noise is added only to the LoRA adapter gradients**, not to all 1.3B parameters. Fewer trainable parameters means the noise-to-signal ratio is much lower, giving better privacy-utility tradeoff than full fine-tuning at the same noise level.
 
 ---
 
@@ -83,10 +91,13 @@ If the data is not present, the script will automatically generate a synthetic d
 ## Installation
 
 ```bash
-pip install torch transformers opacus tabulate
+pip install torch transformers peft bitsandbytes opacus tabulate numpy
 ```
 
-Requires Python ≥ 3.11. GPU (CUDA or Apple MPS) is strongly recommended for the 1.3B parameter model.
+Requires Python ≥ 3.11.
+
+- **CUDA GPU** — required for 4-bit quantization (`bitsandbytes`). Runs the full QLoRA pipeline.
+- **Apple MPS / CPU** — automatically falls back to full-precision LoRA (no quantization). Slower but functional.
 
 ---
 
@@ -117,6 +128,10 @@ All hyperparameters are in the `CONFIG` dictionary at the top of `main.py`:
 | `noise_levels` | [0, 0.0001, 0.0005, 0.002, 0.005] | DP-SGD noise multipliers σ |
 | `max_emails` | 50,000 | Training corpus size |
 | `subset_pairs` | 3,238 | Attack evaluation pairs |
+| `lora_r` | 16 | LoRA rank |
+| `lora_alpha` | 32 | LoRA scaling factor |
+| `lora_target_modules` | `["q_proj", "v_proj"]` | Attention layers to inject LoRA into |
+| `use_4bit` | `True` (if CUDA) | Enable 4-bit NF4 quantization |
 
 ---
 
@@ -159,5 +174,6 @@ The experiment produces a table in the format of Table 11 from the DPFE paper:
 - Huang, J., Shao, H., & Chang, K.C.C. (2022). *Are Large Pre-Trained Language Models Leaking Your Personal Information?* arXiv:2205.12628
 - Carlini, N., et al. (2022). *Quantifying Memorization Across Neural Language Models.* arXiv:2202.07646
 - Abadi, M., et al. (2016). *Deep Learning with Differential Privacy.* ACM CCS 2016.
+- Dettmers, T., et al. (2023). *QLoRA: Efficient Finetuning of Quantized LLMs.* NeurIPS 2023.
 - Klimt, B., & Yang, Y. (2004). *The Enron Corpus: A New Dataset for Email Classification Research.* ECML 2004.
 - Black, S., et al. (2021). *GPT-Neo: Large Scale Autoregressive Language Modeling with Mesh-Tensorflow.*
