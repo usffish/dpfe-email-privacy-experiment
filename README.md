@@ -157,14 +157,55 @@ The experiment produces a table in the format of Table 11 from the DPFE paper:
 
 ---
 
+## Running on USF CIRCE
+
+CIRCE compute nodes have no outbound internet access, so the model weights must be pre-downloaded on a login node before submitting a job.
+
+### Step 1 — Copy the project to scratch
+
+```bash
+cp -r dpfe-email-privacy-experiment /scratch/${USER}/
+cd /scratch/${USER}/dpfe-email-privacy-experiment
+mkdir -p logs
+```
+
+### Step 2 — Pre-download the model (login node)
+
+```bash
+module load python/3.11 cuda/12.1
+export HF_HOME=/scratch/${USER}/hf_cache
+python download_model.py
+```
+
+This downloads GPT-Neo 1.3B (~2.6 GB) into scratch so it doesn't count against your home directory quota.
+
+### Step 3 — Submit the job
+
+```bash
+sbatch run.sbatch
+```
+
+Check status with `squeue -u ${USER}`. Logs are written to `logs/<job_id>.out`.
+
+### CIRCE-specific notes
+
+- **CUDA module** — `run.sbatch` loads `cuda/12.1` by default. Check available versions with `module avail cuda` and update the script if needed.
+- **GPU partition** — the script requests `--partition=gpu`. CIRCE may require a specific partition name; check with `sinfo` or the [CIRCE docs](https://www.usf.edu/research-innovation/research-computing/circe/).
+- **Scratch storage** — model weights, ENRON data, and results all live under `/scratch/${USER}/` to avoid home directory quota limits.
+- **`bitsandbytes`** — 4-bit quantization is Linux/CUDA-native and works without modification on CIRCE.
+
+---
+
 ## Project Structure
 
 ```
 .
-├── main.py          # Full experiment pipeline
-├── pyproject.toml   # Project metadata
-├── enron_data/      # Email corpus (not tracked)
-└── results/         # Output tables (not tracked)
+├── main.py               # Full experiment pipeline
+├── download_model.py     # Pre-download model weights (run on login node)
+├── run.sbatch            # SLURM submission script for CIRCE
+├── pyproject.toml        # Project metadata and dependencies
+├── enron_data/           # Email corpus (not tracked)
+└── results/              # Output tables (not tracked)
 ```
 
 ---
