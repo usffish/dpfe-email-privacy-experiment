@@ -47,6 +47,25 @@ The DPFE framework (from the companion paper) fine-tunes foundation models using
 
 ## Model
 
+This experiment uses **GPT-Neo 1.3B** rather than the GPT-2 model from the original paper. The table below compares them:
+
+| Property | GPT-2 (original paper) | GPT-Neo 1.3B (this experiment) |
+|---|---|---|
+| Developer | OpenAI | EleutherAI |
+| Year | 2019 | 2021 |
+| Parameters | 117M | 1.3B (11× larger) |
+| Architecture | Transformer decoder | Transformer decoder (GPT-style) |
+| Context window | 1,024 tokens | 2,048 tokens |
+| Pre-training data | WebText (~40 GB) | The Pile (~800 GB, includes ENRON) |
+| ENRON in pre-training | No | **Yes** |
+| Weights | Open | Open |
+
+The last row is the most consequential difference for this experiment. GPT-Neo 1.3B was pre-trained on The Pile, which includes the ENRON corpus — meaning it may have already memorized email addresses before fine-tuning begins. GPT-2 had no ENRON exposure at pre-training time, making it a cleaner baseline for isolating what fine-tuning alone causes.
+
+As a result, our attack success rates may be **higher** than the paper's — not because GPT-Neo memorizes more aggressively during fine-tuning, but because leaked addresses may already be present in the base weights and fine-tuning simply reinforces them.
+
+### This experiment's model
+
 | Property | Value |
 |---|---|
 | Model | [EleutherAI/gpt-neo-1.3B](https://huggingface.co/EleutherAI/gpt-neo-1.3B) |
