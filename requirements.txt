@@ -4,5 +4,6 @@ peft
 bitsandbytes
 opacus
 tabulate
+tqdm
 numpy
 python-dotenv
