@@ -21,9 +21,9 @@ export TOKENIZERS_PARALLELISM=false
 export PYTHONUNBUFFERED=1
 
 # Reduced scale for ~4h runtime on GTX 1070 Ti
-export MAX_EMAILS=10000
+export MAX_EMAILS=3000
 export EPOCHS=1
-export SUBSET_PAIRS=500
+export SUBSET_PAIRS=200
 export MAX_NEW_TOKENS=30
 
 # bitsandbytes needs CUDA/C++ libs from the conda env
