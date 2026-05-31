@@ -24,11 +24,11 @@ import numpy as np
 import torch
 from dotenv import load_dotenv
 from torch.utils.data import Dataset, DataLoader
+from torch.optim import AdamW
 from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
     BitsAndBytesConfig,
-    AdamW,
     get_linear_schedule_with_warmup,
 )
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, TaskType
@@ -282,7 +282,7 @@ class QLoRADPTrainer:
             model = AutoModelForCausalLM.from_pretrained(
                 self.model_name,
                 quantization_config=bnb_config,
-                device_map={"": self.device},
+                device_map="auto",
             )
             model = prepare_model_for_kbit_training(model)
         else:

@@ -159,6 +159,42 @@ The experiment produces a table in the format of Table 11 from the DPFE paper:
 
 ---
 
+## Running on Google Colab (`colab` branch)
+
+This branch includes `dpfe_colab.ipynb`, a self-contained notebook that handles setup, data download, and the full experiment run on a Colab GPU.
+
+### Quick start
+
+1. Open the notebook in Colab:
+   [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/usffish/dpfe-email-privacy-experiment/blob/colab/dpfe_colab.ipynb)
+
+2. Go to **Runtime → Change runtime type** and select **A100** (recommended) or V100.
+
+3. Run all cells in order. The notebook will:
+   - Clone this branch and install dependencies
+   - Optionally mount Google Drive to persist results across sessions
+   - Optionally download the real ENRON corpus (~432 MB)
+   - Write your config to `.env` (edit Cell 5 to override defaults)
+   - Run `main.py` and display results
+
+### Estimated runtimes
+
+| GPU | Approx. time |
+|---|---|
+| A100 (40 GB) | ~3–4 hours |
+| V100 (16 GB) | ~6–8 hours |
+| T4 (16 GB) | ~10–14 hours |
+
+### Google Drive persistence
+
+Colab sessions reset after disconnection, losing `/content/`. To keep results and the model cache across sessions:
+
+- Set `USE_DRIVE = True` in Cell 3 of the notebook.
+- Results are symlinked to `MyDrive/dpfe-experiment/results/`.
+- The HuggingFace model cache goes to `MyDrive/dpfe-experiment/hf_cache/` so the ~2.6 GB model download only happens once.
+
+---
+
 ## Running on USF CIRCE
 
 CIRCE compute nodes have no outbound internet access, so the model weights must be pre-downloaded on a login node before submitting a job.
