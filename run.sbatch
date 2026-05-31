@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=dpfe-qlora
-#SBATCH --output=logs/%j.out
-#SBATCH --error=logs/%j.err
-#SBATCH --partition=gpu
+#SBATCH --output=/home/i/ismailj/dpfe-email-privacy-experiment/logs/%j.out
+#SBATCH --error=/home/i/ismailj/dpfe-email-privacy-experiment/logs/%j.err
+#SBATCH --partition=snsm_itn19
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G
@@ -10,37 +10,32 @@
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=ismailjhaveri@gmail.com
 
-# ── Environment ────────────────────────────────────────────────────────────────
-module purge
-module load python/3.11
-module load cuda/12.1   # adjust to whichever version CIRCE provides
+# Hardcoded real home — immune to SLURM inheriting HOME from submission env
+REAL_HOME=/home/i/ismailj
+CONDA_ENV=${REAL_HOME}/miniconda3/envs/my_environment
+WORKDIR=${REAL_HOME}/dpfe-email-privacy-experiment
 
-# Point HuggingFace at scratch so model weights don't eat your home quota.
-# Run download_model.py once before submitting this script.
-export HF_HOME=/scratch/${USER}/hf_cache
-export TRANSFORMERS_OFFLINE=1       # prevents any network calls on compute node
-export TOKENIZERS_PARALLELISM=false # suppresses HF tokenizer fork warning
+export HF_HOME=${REAL_HOME}/hf_cache
+export TRANSFORMERS_OFFLINE=1
+export TOKENIZERS_PARALLELISM=false
+export PYTHONUNBUFFERED=1
 
-# ── Paths ──────────────────────────────────────────────────────────────────────
-WORKDIR=/scratch/${USER}/dpfe-email-privacy-experiment
-mkdir -p "${WORKDIR}/logs"
+# bitsandbytes needs CUDA/C++ libs from the conda env
+export LD_LIBRARY_PATH=${CONDA_ENV}/lib/python3.11/site-packages/torch/lib:${CONDA_ENV}/lib:${CONDA_ENV}/lib/python3.11/site-packages/nvidia/cusparse/lib
 
-# ── Install dependencies (first run only — remove after venv is cached) ────────
-if [ ! -d "${WORKDIR}/.venv" ]; then
-    python -m venv "${WORKDIR}/.venv"
-    source "${WORKDIR}/.venv/bin/activate"
-    pip install --quiet torch transformers peft bitsandbytes opacus tabulate numpy
-else
-    source "${WORKDIR}/.venv/bin/activate"
-fi
+source ${REAL_HOME}/miniconda3/etc/profile.d/conda.sh
+conda activate my_environment
 
-# ── Run ────────────────────────────────────────────────────────────────────────
 echo "Job ID: ${SLURM_JOB_ID}"
 echo "Node:   ${SLURMD_NODENAME}"
 echo "GPU:    $(nvidia-smi --query-gpu=name --format=csv,noheader)"
+echo "HOME:   ${HOME}  REAL_HOME: ${REAL_HOME}"
+echo "CONDA_PREFIX: ${CONDA_PREFIX}"
+echo "LD_LIB: ${LD_LIBRARY_PATH}"
 echo "Start:  $(date)"
 
+mkdir -p "${WORKDIR}/logs"
 cd "${WORKDIR}"
-python main.py
+python -u main.py
 
 echo "End: $(date)"

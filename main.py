@@ -16,19 +16,28 @@ Output: Table 11 - Comparison of Attack Success Rate of Traditional Fine-Tuning
          vs. Fine-Tuning with DPFE at Different Levels of Noise σ
 """
 
+import os as _os
+# bitsandbytes scans ALL env vars containing '/' for libcudart.so.
+# /work_bgfs is inaccessible on CIRCE compute nodes (PermissionError).
+# Remove any env var whose value contains that path before bitsandbytes imports.
+for _k in list(_os.environ.keys()):
+    if '/work_bgfs' in _os.environ.get(_k, ''):
+        del _os.environ[_k]
+del _os, _k
+
 import os
 import re
 import json
 import random
 import numpy as np
 import torch
+from torch.optim import AdamW
 from dotenv import load_dotenv
 from torch.utils.data import Dataset, DataLoader
 from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
     BitsAndBytesConfig,
-    AdamW,
     get_linear_schedule_with_warmup,
 )
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, TaskType
@@ -279,11 +288,33 @@ class QLoRADPTrainer:
                 bnb_4bit_compute_dtype=torch.float16,
                 bnb_4bit_use_double_quant=True,
             )
-            model = AutoModelForCausalLM.from_pretrained(
-                self.model_name,
-                quantization_config=bnb_config,
-                device_map={"": self.device},
-            )
+            import transformers.modeling_utils as _bnb_patch
+            _orig_dispatch = _bnb_patch.dispatch_model
+            import bitsandbytes as _bnb
+            def _safe_dispatch(mdl, device_map, **kwargs):
+                if getattr(mdl, 'quantization_method', None) is not None:
+                    try:
+                        return _orig_dispatch(mdl, device_map, **kwargs)
+                    except ValueError:
+                        mdl.hf_device_map = device_map if isinstance(device_map, dict) else {"":0}
+                        for _n, _p in mdl.named_parameters():
+                            if _p.device.type == "cpu" and not isinstance(_p, _bnb.nn.Params4bit):
+                                _p.data = _p.data.cuda()
+                        for _m in mdl.modules():
+                            for _bn, _b in list(_m._buffers.items()):
+                                if _b is not None and _b.device.type == "cpu":
+                                    _m._buffers[_bn] = _b.cuda()
+                        return mdl
+                return _orig_dispatch(mdl, device_map, **kwargs)
+            _bnb_patch.dispatch_model = _safe_dispatch
+            try:
+                model = AutoModelForCausalLM.from_pretrained(
+                    self.model_name,
+                    quantization_config=bnb_config,
+                    device_map="auto",
+                )
+            finally:
+                _bnb_patch.dispatch_model = _orig_dispatch
             model = prepare_model_for_kbit_training(model)
         else:
             # CPU/MPS fallback: full precision + LoRA only

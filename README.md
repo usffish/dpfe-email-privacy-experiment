@@ -159,42 +159,107 @@ The experiment produces a table in the format of Table 11 from the DPFE paper:
 
 ---
 
-## Running on USF CIRCE
+## Running on USF CIRCE (`circe` branch)
 
-CIRCE compute nodes have no outbound internet access, so the model weights must be pre-downloaded on a login node before submitting a job.
+This branch contains the working configuration for USF's CIRCE HPC cluster. Several non-obvious issues had to be resolved; they are documented here so the setup can be reproduced.
 
-### Step 1 — Copy the project to scratch
+### Environment
+
+| Setting | Value |
+|---|---|
+| Cluster | CIRCE (`circe.rc.usf.edu`) |
+| Partition | `snsm_itn19` |
+| GPU | NVIDIA GTX 1070 Ti (8 GB, compute capability 6.1) |
+| CUDA driver | 11.3 (via driver 465.27) |
+| Python env | Conda: `my_environment` (Python 3.11) |
+| bitsandbytes | 0.41.3 (highest CUDA-capable version available on CIRCE's PyPI mirror) |
+
+### Step 1 — Clone into your home directory
+
+All files **must live under `/home/i/<netid>/`**. `/scratch` and `/work_bgfs` are inaccessible from compute nodes in this partition.
 
 ```bash
-cp -r dpfe-email-privacy-experiment /scratch/${USER}/
-cd /scratch/${USER}/dpfe-email-privacy-experiment
-mkdir -p logs
+# On the CIRCE login node
+cd ~
+git clone https://github.com/usffish/dpfe-email-privacy-experiment.git
+git -C dpfe-email-privacy-experiment checkout circe
+mkdir -p dpfe-email-privacy-experiment/logs
 ```
 
-### Step 2 — Pre-download the model (login node)
+### Step 2 — Pre-download the model (login node only — no internet on compute nodes)
 
 ```bash
-module load python/3.11 cuda/12.1
-export HF_HOME=/scratch/${USER}/hf_cache
+cd ~/dpfe-email-privacy-experiment
+export HF_HOME=~/hf_cache
+conda activate my_environment
 python download_model.py
 ```
 
-This downloads GPT-Neo 1.3B (~2.6 GB) into scratch so it doesn't count against your home directory quota.
+This downloads GPT-Neo 1.3B (~2.6 GB) to `~/hf_cache`.
 
-### Step 3 — Submit the job
+### Step 3 — Edit `run.sbatch` to set your username
+
+`run.sbatch` uses hardcoded absolute paths (required because SLURM may inherit a wrong `$HOME` from the submission environment):
+
+```bash
+# Change this line in run.sbatch:
+REAL_HOME=/home/i/ismailj   # <-- replace ismailj with your CIRCE NetID
+```
+
+### Step 4 — Submit
 
 ```bash
 sbatch run.sbatch
+squeue -u $USER          # check queue
+tail -f logs/<jobid>.out # watch live output
 ```
 
-Check status with `squeue -u ${USER}`. Logs are written to `logs/<job_id>.out`.
+---
 
-### CIRCE-specific notes
+### CIRCE-specific issues resolved in this branch
 
-- **CUDA module** — `run.sbatch` loads `cuda/12.1` by default. Check available versions with `module avail cuda` and update the script if needed.
-- **GPU partition** — the script requests `--partition=gpu`. CIRCE may require a specific partition name; check with `sinfo` or the [CIRCE docs](https://www.usf.edu/research-innovation/research-computing/circe/).
-- **Scratch storage** — model weights, ENRON data, and results all live under `/scratch/${USER}/` to avoid home directory quota limits.
-- **`bitsandbytes`** — 4-bit quantization is Linux/CUDA-native and works without modification on CIRCE.
+#### 1. `$HOME` is unreliable in SLURM jobs
+SLURM inherits environment variables from wherever `sbatch` is called. If submitted via an SSH connection that propagated a different `$HOME` (e.g., from a local Mac), `$HOME`, `$CONDA_PREFIX`, and `$LD_LIBRARY_PATH` all resolve incorrectly. **Fix:** `run.sbatch` sets `REAL_HOME=/home/i/ismailj` as a hardcoded constant and uses it for all paths.
+
+#### 2. `LD_LIBRARY_PATH` must include CUDA libraries from the conda env
+CIRCE's compute nodes in `snsm_itn19` do not load a CUDA module. `bitsandbytes` needs `libcudart.so.11.0`, `libcublas.so.11`, `libcublasLt.so.11`, and `libcusparse.so.11`, all of which ship inside the conda env (via `torch` and `nvidia-cusparse-cu11`). **Fix:** `run.sbatch` exports:
+```bash
+export LD_LIBRARY_PATH=${CONDA_ENV}/lib/python3.11/site-packages/torch/lib:${CONDA_ENV}/lib:${CONDA_ENV}/lib/python3.11/site-packages/nvidia/cusparse/lib
+```
+
+#### 3. bitsandbytes crashes with `PermissionError` on `/work_bgfs`
+bitsandbytes 0.41.3 scans **all** environment variables that contain `/` in their value, looking for `libcudart.so`. SLURM injects a variable pointing to `/work_bgfs/i/<netid>/`, which is inaccessible (permission denied). This crashes bitsandbytes at import time. **Fix:** `main.py` purges those env vars before any import:
+```python
+import os as _os
+for _k in list(_os.environ.keys()):
+    if '/work_bgfs' in _os.environ.get(_k, ''):
+        del _os.environ[_k]
+del _os, _k
+```
+
+#### 4. `dispatch_model` calls `.to()` on 4-bit models (accelerate/transformers version mismatch)
+`accelerate 1.13.0` + `transformers 4.38.2` + `bitsandbytes 0.41.3` have a version mismatch: `dispatch_model` calls `model.to(device)` which bitsandbytes 4-bit models forbid. Newer bitsandbytes versions fix this, but only CPU-only wheels ≥ 0.43 are available on CIRCE's PyPI mirror. **Fix:** `main.py` monkey-patches `transformers.modeling_utils.dispatch_model` to catch the `ValueError` and manually move non-quantized parameters and buffers to CUDA:
+```python
+import transformers.modeling_utils as _bnb_patch
+_orig_dispatch = _bnb_patch.dispatch_model
+import bitsandbytes as _bnb
+def _safe_dispatch(mdl, device_map, **kwargs):
+    if getattr(mdl, 'quantization_method', None) is not None:
+        try:
+            return _orig_dispatch(mdl, device_map, **kwargs)
+        except ValueError:
+            mdl.hf_device_map = device_map if isinstance(device_map, dict) else {"": 0}
+            for _n, _p in mdl.named_parameters():
+                if _p.device.type == "cpu" and not isinstance(_p, _bnb.nn.Params4bit):
+                    _p.data = _p.data.cuda()
+            for _m in mdl.modules():
+                for _bn, _b in list(_m._buffers.items()):
+                    if _b is not None and _b.device.type == "cpu":
+                        _m._buffers[_bn] = _b.cuda()
+            return mdl
+    return _orig_dispatch(mdl, device_map, **kwargs)
+_bnb_patch.dispatch_model = _safe_dispatch
+```
 
 ---
 
