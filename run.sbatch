@@ -6,7 +6,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G
-#SBATCH --time=48:00:00
+#SBATCH --time=6:00:00
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=ismailjhaveri@gmail.com
 
@@ -19,6 +19,12 @@ export HF_HOME=${REAL_HOME}/hf_cache
 export TRANSFORMERS_OFFLINE=1
 export TOKENIZERS_PARALLELISM=false
 export PYTHONUNBUFFERED=1
+
+# Reduced scale for ~4h runtime on GTX 1070 Ti
+export MAX_EMAILS=10000
+export EPOCHS=1
+export SUBSET_PAIRS=500
+export MAX_NEW_TOKENS=30
 
 # bitsandbytes needs CUDA/C++ libs from the conda env
 export LD_LIBRARY_PATH=${CONDA_ENV}/lib/python3.11/site-packages/torch/lib:${CONDA_ENV}/lib:${CONDA_ENV}/lib/python3.11/site-packages/nvidia/cusparse/lib

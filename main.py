@@ -81,6 +81,7 @@ CONFIG = {
     "lora_dropout": float(os.getenv("LORA_DROPOUT", 0.05)),
     "lora_target_modules": ["q_proj", "v_proj"],  # GPT-Neo attention projections
     "use_4bit": torch.cuda.is_available(),  # 4-bit quantization requires CUDA
+    "max_new_tokens": int(os.getenv("MAX_NEW_TOKENS", 100)),
 }
 
 
@@ -446,7 +447,9 @@ class PrivacyAttack:
         self.tokenizer = tokenizer
         self.device = device
 
-    def generate_email(self, model, name, max_new_tokens=100):
+    def generate_email(self, model, name, max_new_tokens=None):
+        if max_new_tokens is None:
+            max_new_tokens = CONFIG["max_new_tokens"]
         prompt = self.PROMPT_TEMPLATE.format(name=name)
         input_ids = self.tokenizer.encode(prompt, return_tensors="pt").to(self.device)
 
