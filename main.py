@@ -34,6 +34,7 @@ from transformers import (
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, TaskType
 from opacus.accountants import RDPAccountant
 from tabulate import tabulate
+from tqdm.auto import tqdm
 import email
 from email.utils import parseaddr
 import warnings
@@ -115,19 +116,21 @@ class EnronDataProcessor:
     def process_directory(self, root_dir):
         """Recursively process all email files in the ENRON directory."""
         count = 0
-        for dirpath, dirnames, filenames in os.walk(root_dir):
-            for filename in filenames:
-                if count >= CONFIG["max_emails"]:
-                    return
-                filepath = os.path.join(dirpath, filename)
-                body, name, addr = self.parse_email_file(filepath)
-                if body and len(body.strip()) > 50:
-                    self.email_bodies.append(body.strip())
-                    count += 1
-                if name and addr and "@" in addr:
-                    if "enron.com" not in addr.lower():
-                        if len(name.split()) <= 3 and len(name.strip()) > 0:
-                            self.name_email_pairs.append((name.strip(), addr.strip().lower()))
+        with tqdm(total=CONFIG["max_emails"], desc="Parsing emails", unit="email") as pbar:
+            for dirpath, dirnames, filenames in os.walk(root_dir):
+                for filename in filenames:
+                    if count >= CONFIG["max_emails"]:
+                        return
+                    filepath = os.path.join(dirpath, filename)
+                    body, name, addr = self.parse_email_file(filepath)
+                    if body and len(body.strip()) > 50:
+                        self.email_bodies.append(body.strip())
+                        count += 1
+                        pbar.update(1)
+                    if name and addr and "@" in addr:
+                        if "enron.com" not in addr.lower():
+                            if len(name.split()) <= 3 and len(name.strip()) > 0:
+                                self.name_email_pairs.append((name.strip(), addr.strip().lower()))
 
         self.name_email_pairs = list(set(self.name_email_pairs))
 
@@ -196,24 +199,28 @@ class EnronDataProcessor:
         ]
 
         pairs_set = set()
-        while len(pairs_set) < CONFIG["subset_pairs"]:
-            first = random.choice(first_names)
-            last = random.choice(last_names)
-            domain = random.choice(domains)
-            name = f"{first} {last}"
-            pattern = random.choice([
-                f"{first.lower()}.{last.lower()}",
-                f"{first[0].lower()}{last.lower()}",
-                f"{first.lower()}{last[0].lower()}",
-                f"{first.lower()}_{last.lower()}",
-                f"{first.lower()}{last.lower()}",
-                f"{first[0].lower()}{last[0].lower()}{random.randint(1, 99)}",
-            ])
-            pairs_set.add((name, f"{pattern}@{domain}"))
+        with tqdm(total=CONFIG["subset_pairs"], desc="Generating pairs", unit="pair") as pbar:
+            while len(pairs_set) < CONFIG["subset_pairs"]:
+                first = random.choice(first_names)
+                last = random.choice(last_names)
+                domain = random.choice(domains)
+                name = f"{first} {last}"
+                pattern = random.choice([
+                    f"{first.lower()}.{last.lower()}",
+                    f"{first[0].lower()}{last.lower()}",
+                    f"{first.lower()}{last[0].lower()}",
+                    f"{first.lower()}_{last.lower()}",
+                    f"{first.lower()}{last.lower()}",
+                    f"{first[0].lower()}{last[0].lower()}{random.randint(1, 99)}",
+                ])
+                prev_len = len(pairs_set)
+                pairs_set.add((name, f"{pattern}@{domain}"))
+                if len(pairs_set) > prev_len:
+                    pbar.update(1)
 
         self.name_email_pairs = list(pairs_set)
 
-        for _ in range(CONFIG["max_emails"]):
+        for _ in tqdm(range(CONFIG["max_emails"]), desc="Generating email bodies", unit="email"):
             template = random.choice(email_templates)
             pair = random.choice(self.name_email_pairs)
             sender_pair = random.choice(self.name_email_pairs)
@@ -228,7 +235,7 @@ class EnronDataProcessor:
 class EmailDataset(Dataset):
     def __init__(self, texts, tokenizer, max_length=256):
         self.encodings = []
-        for text in texts:
+        for text in tqdm(texts, desc="Tokenizing", unit="email", leave=False):
             encoding = tokenizer(
                 text,
                 truncation=True,
@@ -355,7 +362,8 @@ class QLoRADPTrainer:
         for epoch in range(epochs):
             total_loss = 0
             num_batches = 0
-            for batch in dataloader:
+            pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}", unit="batch")
+            for batch in pbar:
                 input_ids = batch["input_ids"].to(self.device)
                 attention_mask = batch["attention_mask"].to(self.device)
                 labels = batch["labels"].to(self.device)
@@ -372,6 +380,7 @@ class QLoRADPTrainer:
                 total_loss += outputs.loss.item()
                 num_batches += 1
                 step += 1
+                pbar.set_postfix(loss=f"{total_loss / num_batches:.4f}")
 
             avg_loss = total_loss / max(num_batches, 1)
             print(f"  Epoch {epoch+1}/{epochs} - Avg Loss: {avg_loss:.4f}")
@@ -421,15 +430,14 @@ class PrivacyAttack:
         valid_format = 0
         total = len(name_email_pairs)
 
-        print(f"\n  Running privacy attack on {total} pairs...")
-        for i, (name, true_email) in enumerate(name_email_pairs):
+        pbar = tqdm(name_email_pairs, desc="Privacy attack", unit="pair")
+        for name, true_email in pbar:
             predicted = self.generate_email(model, name)
             if predicted:
                 valid_format += 1
                 if predicted == true_email.lower():
                     successful += 1
-            if (i + 1) % 500 == 0:
-                print(f"    Processed {i+1}/{total} pairs...")
+            pbar.set_postfix(hits=successful, rate=f"{successful / max(pbar.n, 1) * 100:.2f}%")
 
         attack_rate = successful / total * 100
         correctness = valid_format / total * 100
@@ -467,7 +475,12 @@ def run_experiment():
     results = []
     baseline_rate = None
 
-    for noise in CONFIG["noise_levels"]:
+    noise_levels = CONFIG["noise_levels"]
+    run_pbar = tqdm(enumerate(noise_levels, 1), total=len(noise_levels),
+                    desc="Experiment runs", unit="run")
+    for run_idx, noise in run_pbar:
+        run_pbar.set_description(f"Run {run_idx}/{len(noise_levels)}  σ={noise}")
+
         model = trainer.train(
             train_texts,
             noise_multiplier=noise,
