@@ -204,6 +204,8 @@ This branch includes `dpfe_colab.ipynb`, a self-contained notebook that handles 
 | V100 (16 GB) | ~6–8 hours |
 | T4 (16 GB) | ~10–14 hours |
 
+**First run only:** the script scans all ~517,000 ENRON files to collect the 3,238 non-ENRON (name, email) attack pairs. This takes an extra **8–10 minutes** but only happens once — results are cached to `enron_data/processed_data.json` and loaded instantly on subsequent runs.
+
 ### Handling disconnections
 
 Colab sessions disconnect without warning, resetting `/content/` and losing all progress. Two mechanisms protect against this:
