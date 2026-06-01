@@ -205,6 +205,10 @@ git -C dpfe-email-privacy-experiment checkout circe
 mkdir -p dpfe-email-privacy-experiment/logs
 ```
 
+### Note on first-run corpus scan
+
+On the first job submission, the script scans all ~517,000 ENRON files to collect the 3,238 non-ENRON (name, email) attack pairs. This takes an extra **8–10 minutes** but only happens once — results are cached to `enron_data/processed_data.json` and loaded instantly on all subsequent runs.
+
 ### Step 2 — Pre-download the model (login node only — no internet on compute nodes)
 
 ```bash
