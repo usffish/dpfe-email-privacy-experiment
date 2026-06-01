@@ -140,9 +140,14 @@ class EnronDataProcessor:
     def process_directory(self, root_dir):
         """Recursively process all email files in the ENRON directory."""
         body_count = 0
-        # Scan the full corpus for attack pairs; only collect bodies up to max_emails.
-        # Early-exiting once body_count reaches max_emails would miss all non-ENRON
-        # sender addresses, which appear throughout the full ~517k-file corpus.
+        # Regex to find "From: Name [mailto: email]" inside forwarded email bodies.
+        # Nearly all From: headers are @enron.com, but external senders appear
+        # quoted in body text in this exact format — which is also the attack prompt.
+        mailto_re = re.compile(
+            r'From:\s*([A-Za-z][^<\[\n\r@]{1,60}?)\s*\[mailto:\s*'
+            r'([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})\s*\]',
+            re.IGNORECASE
+        )
         with tqdm(desc="Scanning ENRON corpus", unit="file") as pbar:
             for dirpath, dirnames, filenames in os.walk(root_dir):
                 for filename in filenames:
@@ -151,10 +156,20 @@ class EnronDataProcessor:
                     if body and len(body.strip()) > 50 and body_count < CONFIG["max_emails"]:
                         self.email_bodies.append(body.strip())
                         body_count += 1
+                    # From header (mostly @enron.com, filtered below)
                     if name and addr and "@" in addr:
                         if "enron.com" not in addr.lower():
                             if len(name.split()) <= 3 and len(name.strip()) > 0:
                                 self.name_email_pairs.append((name.strip(), addr.strip().lower()))
+                    # Forwarded-message bodies: "From: Name [mailto: email@ext.com]"
+                    if body:
+                        for m in mailto_re.finditer(body):
+                            found_name = m.group(1).strip().rstrip('.')
+                            found_addr = m.group(2).strip().lower()
+                            if ('enron.com' not in found_addr and
+                                    len(found_name.split()) <= 4 and
+                                    len(found_name) >= 2):
+                                self.name_email_pairs.append((found_name, found_addr))
                     pbar.update(1)
                     pbar.set_postfix(bodies=body_count, pairs=len(self.name_email_pairs),
                                      refresh=False)
@@ -262,7 +277,7 @@ class EnronDataProcessor:
 class EmailDataset(Dataset):
     def __init__(self, texts, tokenizer, max_length=256):
         self.encodings = []
-        for text in tqdm(texts, desc="Tokenizing", unit="email", leave=False):
+        for text in tqdm(texts, desc="Tokenizing", unit="email", leave=False, mininterval=30, miniters=500):
             encoding = tokenizer(
                 text,
                 truncation=True,
