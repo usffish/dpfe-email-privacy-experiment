@@ -55,7 +55,15 @@ def tqdm(*args, **kwargs):
     kwargs.setdefault("file", sys.stdout)
     return _tqdm_base(*args, **kwargs)
 
+# Suppress verbose output from HuggingFace hub and bitsandbytes
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+import logging as _logging
+_logging.getLogger("bitsandbytes").setLevel(_logging.ERROR)
+
 load_dotenv()
+
+import transformers as _transformers_mod
+_transformers_mod.logging.set_verbosity_error()
 
 # ============================================================
 # Configuration
@@ -131,22 +139,25 @@ class EnronDataProcessor:
 
     def process_directory(self, root_dir):
         """Recursively process all email files in the ENRON directory."""
-        count = 0
-        with tqdm(total=CONFIG["max_emails"], desc="Parsing emails", unit="email") as pbar:
+        body_count = 0
+        # Scan the full corpus for attack pairs; only collect bodies up to max_emails.
+        # Early-exiting once body_count reaches max_emails would miss all non-ENRON
+        # sender addresses, which appear throughout the full ~517k-file corpus.
+        with tqdm(desc="Scanning ENRON corpus", unit="file") as pbar:
             for dirpath, dirnames, filenames in os.walk(root_dir):
                 for filename in filenames:
-                    if count >= CONFIG["max_emails"]:
-                        return
                     filepath = os.path.join(dirpath, filename)
                     body, name, addr = self.parse_email_file(filepath)
-                    if body and len(body.strip()) > 50:
+                    if body and len(body.strip()) > 50 and body_count < CONFIG["max_emails"]:
                         self.email_bodies.append(body.strip())
-                        count += 1
-                        pbar.update(1)
+                        body_count += 1
                     if name and addr and "@" in addr:
                         if "enron.com" not in addr.lower():
                             if len(name.split()) <= 3 and len(name.strip()) > 0:
                                 self.name_email_pairs.append((name.strip(), addr.strip().lower()))
+                    pbar.update(1)
+                    pbar.set_postfix(bodies=body_count, pairs=len(self.name_email_pairs),
+                                     refresh=False)
 
         self.name_email_pairs = list(set(self.name_email_pairs))
 
@@ -321,18 +332,26 @@ class QLoRADPTrainer:
                         return mdl
                 return _orig_dispatch(mdl, device_map, **kwargs)
             _bnb_patch.dispatch_model = _safe_dispatch
+            print("  Loading model weights...", flush=True)
+            import contextlib, io as _io
             try:
-                model = AutoModelForCausalLM.from_pretrained(
-                    self.model_name,
-                    quantization_config=bnb_config,
-                    device_map="auto",
-                )
+                with contextlib.redirect_stderr(_io.StringIO()):
+                    model = AutoModelForCausalLM.from_pretrained(
+                        self.model_name,
+                        quantization_config=bnb_config,
+                        device_map="auto",
+                    )
             finally:
                 _bnb_patch.dispatch_model = _orig_dispatch
+            print("  Model loaded.", flush=True)
             model = prepare_model_for_kbit_training(model)
         else:
             # CPU/MPS fallback: full precision + LoRA only
-            model = AutoModelForCausalLM.from_pretrained(self.model_name)
+            import contextlib, io as _io
+            print("  Loading model weights...", flush=True)
+            with contextlib.redirect_stderr(_io.StringIO()):
+                model = AutoModelForCausalLM.from_pretrained(self.model_name)
+            print("  Model loaded.", flush=True)
             model.to(self.device)
 
         lora_config = LoraConfig(
@@ -400,7 +419,8 @@ class QLoRADPTrainer:
         for epoch in range(epochs):
             total_loss = 0
             num_batches = 0
-            pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}", unit="batch")
+            pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}", unit="batch",
+                        mininterval=30, miniters=50)
             for batch in pbar:
                 input_ids = batch["input_ids"].to(self.device)
                 attention_mask = batch["attention_mask"].to(self.device)
