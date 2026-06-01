@@ -204,13 +204,24 @@ This branch includes `dpfe_colab.ipynb`, a self-contained notebook that handles 
 | V100 (16 GB) | ~6–8 hours |
 | T4 (16 GB) | ~10–14 hours |
 
-### Google Drive persistence
+### Handling disconnections
 
-Colab sessions reset after disconnection, losing `/content/`. To keep results and the model cache across sessions:
+Colab sessions disconnect without warning, resetting `/content/` and losing all progress. Two mechanisms protect against this:
 
-- Set `USE_DRIVE = True` in Cell 3 of the notebook.
-- Results are symlinked to `MyDrive/dpfe-experiment/results/`.
-- The HuggingFace model cache goes to `MyDrive/dpfe-experiment/hf_cache/` so the ~2.6 GB model download only happens once.
+**1. Google Drive persistence (Cell 3)**
+
+Set `USE_DRIVE = True` (the default). This symlinks `results/` and the HuggingFace model cache into `MyDrive/dpfe-experiment/` so they survive session resets:
+
+- Results are written to `MyDrive/dpfe-experiment/results/`.
+- The model cache goes to `MyDrive/dpfe-experiment/hf_cache/` — the ~2.6 GB download only happens once.
+
+**2. Checkpoint/resume logic (automatic)**
+
+`main.py` saves `table_11_results.json` to Drive after **every noise level** completes. On the next run it reads this file and skips any noise level already present. This means:
+
+- A disconnect only loses the *currently running* noise level — at most ~45 min on an A100.
+- To resume: reconnect, re-run all cells from the top. The experiment picks up from where it left off automatically.
+- A fresh run (no checkpoint file) starts from the beginning as normal.
 
 ---
 

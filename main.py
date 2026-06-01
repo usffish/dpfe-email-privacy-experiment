@@ -460,6 +460,24 @@ def run_experiment():
     print(f"Device: {CONFIG['device']}")
     print("=" * 60)
 
+    # Resume from checkpoint if partial results already exist on Drive.
+    # Completed noise levels are skipped so a disconnect only loses the current run.
+    results_path = os.path.join(CONFIG["output_dir"], "table_11_results.json")
+    results = []
+    completed_noise_levels = set()
+    baseline_rate = None
+
+    if os.path.exists(results_path):
+        with open(results_path) as f:
+            results = json.load(f)
+        completed_noise_levels = {r["noise"] for r in results}
+        for r in results:
+            if r["noise"] == 0:
+                baseline_rate = r["attack_success_rate"]
+                break
+        print(f"\nResuming: {len(results)}/{len(CONFIG['noise_levels'])} runs already complete.")
+        print(f"Skipping σ values: {sorted(completed_noise_levels)}")
+
     print("\n[Step 1] Loading and processing ENRON email data...")
     processor = EnronDataProcessor(CONFIG["data_dir"])
     processor.load_or_create_synthetic_data()
@@ -472,14 +490,15 @@ def run_experiment():
     trainer = QLoRADPTrainer(CONFIG["model_name"], CONFIG["device"])
     attacker = PrivacyAttack(trainer.tokenizer, CONFIG["device"])
 
-    results = []
-    baseline_rate = None
-
     noise_levels = CONFIG["noise_levels"]
     run_pbar = tqdm(enumerate(noise_levels, 1), total=len(noise_levels),
                     desc="Experiment runs", unit="run")
     for run_idx, noise in run_pbar:
         run_pbar.set_description(f"Run {run_idx}/{len(noise_levels)}  σ={noise}")
+
+        if noise in completed_noise_levels:
+            print(f"\n  Skipping σ={noise} (already complete)")
+            continue
 
         model = trainer.train(
             train_texts,
@@ -504,6 +523,12 @@ def run_experiment():
             "num_extracted": num_extracted,
         })
 
+        # Write checkpoint after every run so Drive always has the latest state.
+        results.sort(key=lambda r: r["noise"])
+        with open(results_path, "w") as f:
+            json.dump(results, f, indent=2)
+        print(f"  Checkpoint saved → {results_path}")
+
         print(f"\n  Results for σ={noise}:")
         print(f"    Attack Success Rate:  {attack_rate:.2f}%")
         print(f"    Privacy Enhancement: {privacy_enhancement:.0f}%")
@@ -514,11 +539,8 @@ def run_experiment():
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
+    results.sort(key=lambda r: r["noise"])
     print_results_table(results)
-
-    results_path = os.path.join(CONFIG["output_dir"], "table_11_results.json")
-    with open(results_path, "w") as f:
-        json.dump(results, f, indent=2)
     print(f"\nResults saved to {results_path}")
 
 
