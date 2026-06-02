@@ -379,11 +379,15 @@ class LoRADPTrainer:
             for batch in pbar:
                 optimizer.zero_grad()
 
-                outputs = model(
-                    input_ids=batch["input_ids"].to(self.device),
-                    attention_mask=batch["attention_mask"].to(self.device),
-                    labels=batch["labels"].to(self.device),
-                )
+                # autocast keeps matmuls in float16 for speed/memory but forces
+                # log_softmax/cross_entropy into float32, preventing NaN loss on
+                # float16 models (GPT-2 GELU + logit softmax can overflow float16).
+                with torch.cuda.amp.autocast():
+                    outputs = model(
+                        input_ids=batch["input_ids"].to(self.device),
+                        attention_mask=batch["attention_mask"].to(self.device),
+                        labels=batch["labels"].to(self.device),
+                    )
                 outputs.loss.backward()
 
                 if noise_multiplier == 0:
