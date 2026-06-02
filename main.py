@@ -161,8 +161,10 @@ class EnronDataProcessor:
                     pbar.set_postfix(bodies=body_count, pairs=len(self.name_email_pairs),
                                      refresh=False)
                     # Stop as soon as we have enough of both — no need to scan all 517k files.
+                    # Use *6 headroom: the early part of the corpus has ~60–70% duplicate pairs,
+                    # so we need many more raw pairs than unique ones.
                     if (body_count >= CONFIG["max_emails"] and
-                            len(self.name_email_pairs) >= CONFIG["subset_pairs"] * 2):
+                            len(self.name_email_pairs) >= CONFIG["subset_pairs"] * 6):
                         break
                 else:
                     continue
@@ -583,7 +585,7 @@ def print_results_table(results):
     print(f"LoRA: float16 | r={CONFIG['lora_r']}, α={CONFIG['lora_alpha']}, "
           f"targets={CONFIG['lora_target_modules']}")
     print(f"Dataset: ENRON Email Corpus ({CONFIG['max_emails']:,} emails)")
-    print(f"Attack pairs: {CONFIG['subset_pairs']:,} (name, email) pairs")
+    print(f"Attack pairs: {len(attack_pairs):,} (name, email) pairs")
     print("Attack method: Carlini et al. (2022) — prompt-based email extraction")
     print("Privacy mechanism: Opacus DP-SGD on LoRA adapter gradients")
 
