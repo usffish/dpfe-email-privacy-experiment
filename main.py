@@ -61,7 +61,6 @@ CONFIG = {
     "learning_rate": float(os.getenv("LEARNING_RATE", 5e-5)),
     "max_grad_norm": float(os.getenv("MAX_GRAD_NORM", 1.0)),
     "noise_levels": [0, 0.0001, 0.0005, 0.002, 0.005],
-    "num_attack_samples": 100,
     "seed": int(os.getenv("SEED", 42)),
     "device": "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu",
     "data_dir": os.getenv("DATA_DIR", "enron_data"),
@@ -256,32 +255,34 @@ class EnronDataProcessor:
 
 
 # ============================================================
-# Dataset for Fine-Tuning
+# Dataset for Fine-Tuning — lazy tokenization
 # ============================================================
 class EmailDataset(Dataset):
+    """Tokenizes on demand in __getitem__ to avoid holding all tensors in RAM."""
+
     def __init__(self, texts, tokenizer, max_length=256):
-        self.encodings = []
-        for text in tqdm(texts, desc="Tokenizing", unit="email", leave=False, mininterval=30, miniters=500):
-            encoding = tokenizer(
-                text,
-                truncation=True,
-                max_length=max_length,
-                padding="max_length",
-                return_tensors="pt"
-            )
-            self.encodings.append(encoding)
+        self.texts = texts
+        self.tokenizer = tokenizer
+        self.max_length = max_length
 
     def __len__(self):
-        return len(self.encodings)
+        return len(self.texts)
 
     def __getitem__(self, idx):
-        item = {key: val.squeeze(0) for key, val in self.encodings[idx].items()}
+        encoding = self.tokenizer(
+            self.texts[idx],
+            truncation=True,
+            max_length=self.max_length,
+            padding="max_length",
+            return_tensors="pt",
+        )
+        item = {key: val.squeeze(0) for key, val in encoding.items()}
         item["labels"] = item["input_ids"].clone()
         return item
 
 
 # ============================================================
-# QLoRA Trainer with Manual DP-SGD
+# QLoRA Trainer with correct per-sample DP-SGD
 # ============================================================
 class QLoRADPTrainer:
     """
@@ -292,9 +293,11 @@ class QLoRADPTrainer:
       - LoRA adapters injected on q_proj/v_proj attention layers — only trained params
       - DP-SGD noise applied exclusively to LoRA adapter gradients
 
-    This avoids Opacus compatibility issues with 4-bit layers while preserving
-    correct differential privacy: the frozen base weights receive no gradient
-    updates and therefore need no noise.
+    DP-SGD implementation:
+      - For σ > 0: per-sample gradient clipping (correct DP-SGD). Each sample's
+        gradient is clipped to max_grad_norm before accumulation, then Gaussian
+        noise N(0, σ²·C²) is added to the sum. Sensitivity = C = max_grad_norm.
+      - For σ = 0: standard batch training (no privacy guarantee; used for baseline).
     """
 
     def __init__(self, model_name, device):
@@ -314,7 +317,6 @@ class QLoRADPTrainer:
                 bnb_4bit_compute_dtype=torch.float16,
                 bnb_4bit_use_double_quant=True,
             )
-            # Redirect stderr to suppress bitsandbytes' per-parameter loading bar
             with contextlib.redirect_stderr(_io.StringIO()):
                 model = AutoModelForCausalLM.from_pretrained(
                     self.model_name,
@@ -323,7 +325,6 @@ class QLoRADPTrainer:
                 )
             model = prepare_model_for_kbit_training(model)
         else:
-            # CPU/MPS fallback: full precision + LoRA only
             with contextlib.redirect_stderr(_io.StringIO()):
                 model = AutoModelForCausalLM.from_pretrained(self.model_name)
             model.to(self.device)
@@ -341,31 +342,76 @@ class QLoRADPTrainer:
         model.print_trainable_parameters()
         return model
 
-    def _apply_dp_noise(self, model, noise_multiplier):
-        """Clip gradients and add Gaussian noise to LoRA adapter parameters only."""
-        trainable = [p for p in model.parameters() if p.requires_grad and p.grad is not None]
-        torch.nn.utils.clip_grad_norm_(trainable, CONFIG["max_grad_norm"])
-        if noise_multiplier > 0:
-            for param in trainable:
-                noise = torch.normal(
-                    mean=0.0,
-                    std=noise_multiplier * CONFIG["max_grad_norm"],
-                    size=param.grad.shape,
-                    device=param.grad.device,
-                    dtype=param.grad.dtype,
-                )
-                param.grad.add_(noise)
+    def _dp_step(self, model, batch, noise_multiplier):
+        """
+        Correct DP-SGD gradient step: per-sample clipping then noise addition.
 
-    def _compute_epsilon(self, steps, noise_multiplier, delta=1e-5):
+        For each of the batch_size samples:
+          1. Compute individual gradient via backward()
+          2. Clip to max_grad_norm (L2 sensitivity = C)
+          3. Accumulate clipped gradients
+
+        After all samples:
+          4. Add Gaussian noise N(0, (σ·C)²) to the accumulated sum
+          5. Divide by batch_size and assign to p.grad for the optimizer
+
+        Returns the mean loss over the batch.
+        """
+        trainable = [p for p in model.parameters() if p.requires_grad]
+        batch_size = batch["input_ids"].shape[0]
+        C = CONFIG["max_grad_norm"]
+        accumulated = [torch.zeros_like(p) for p in trainable]
+        total_loss = 0.0
+
+        for i in range(batch_size):
+            for p in trainable:
+                if p.grad is not None:
+                    p.grad.zero_()
+
+            out = model(
+                input_ids=batch["input_ids"][i:i+1].to(self.device),
+                attention_mask=batch["attention_mask"][i:i+1].to(self.device),
+                labels=batch["labels"][i:i+1].to(self.device),
+            )
+            out.loss.backward()
+            total_loss += out.loss.item()
+
+            # Per-sample gradient norm and clipping
+            sample_grads = [
+                p.grad.detach().clone() if p.grad is not None else torch.zeros_like(p)
+                for p in trainable
+            ]
+            norm = torch.sqrt(sum((g ** 2).sum() for g in sample_grads))
+            scale = min(1.0, C / (norm.item() + 1e-8))
+            for acc, g in zip(accumulated, sample_grads):
+                acc.add_(g * scale)
+
+        # Gaussian noise calibrated to sensitivity C
+        for acc in accumulated:
+            acc.add_(torch.normal(
+                mean=0.0,
+                std=noise_multiplier * C,
+                size=acc.shape,
+                device=acc.device,
+                dtype=acc.dtype,
+            ))
+
+        # Averaged gradient (matches standard optimizer convention)
+        for p, acc in zip(trainable, accumulated):
+            p.grad = acc / batch_size
+
+        return total_loss / batch_size
+
+    def _compute_epsilon(self, steps, noise_multiplier, n_samples, delta=1e-5):
         """Compute DP epsilon via RDP accounting (Opacus accountant)."""
         if noise_multiplier == 0:
             return float("inf")
         accountant = RDPAccountant()
-        sampling_rate = CONFIG["batch_size"] / CONFIG["max_emails"]
+        # Use actual dataset size, not config max (real corpus may be smaller)
+        sampling_rate = CONFIG["batch_size"] / n_samples
         for _ in range(steps):
             accountant.step(noise_multiplier=noise_multiplier, sample_rate=sampling_rate)
-        epsilon = accountant.get_epsilon(delta=delta)
-        return epsilon
+        return accountant.get_epsilon(delta=delta)
 
     def train(self, train_texts, noise_multiplier=0.0, epochs=3, batch_size=16):
         """Fine-tune with QLoRA. DP-SGD is applied when noise_multiplier > 0."""
@@ -373,12 +419,18 @@ class QLoRADPTrainer:
         print(f"Training with noise σ = {noise_multiplier}")
         quant_str = "4-bit NF4 + LoRA" if CONFIG["use_4bit"] else "LoRA (full precision)"
         print(f"Mode: QLoRA ({quant_str})")
+        if noise_multiplier > 0:
+            print(f"DP-SGD: per-sample clipping (C={CONFIG['max_grad_norm']}, σ={noise_multiplier})")
         print(f"{'='*60}")
 
         model = self._load_model()
         model.train()
 
         dataset = EmailDataset(train_texts, self.tokenizer, CONFIG["max_length"])
+        n_samples = len(dataset)
+        # drop_last=True ensures uniform batch sizes, which simplifies per-sample
+        # DP-SGD and the sampling-rate calculation for RDP accounting. At most
+        # (batch_size - 1) samples per epoch are discarded.
         dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
 
         optimizer = AdamW(
@@ -391,26 +443,37 @@ class QLoRADPTrainer:
         )
 
         step = 0
+        final_epsilon = float("inf")
+
         for epoch in range(epochs):
-            total_loss = 0
+            total_loss = 0.0
             num_batches = 0
             pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}", unit="batch",
                         mininterval=30, miniters=50)
+
             for batch in pbar:
-                input_ids = batch["input_ids"].to(self.device)
-                attention_mask = batch["attention_mask"].to(self.device)
-                labels = batch["labels"].to(self.device)
+                optimizer.zero_grad()
 
-                outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
-                outputs.loss.backward()
-
-                self._apply_dp_noise(model, noise_multiplier)
+                if noise_multiplier > 0:
+                    # Correct DP-SGD: per-sample clipped gradients + noise
+                    loss_val = self._dp_step(model, batch, noise_multiplier)
+                else:
+                    # Baseline (no privacy): standard batch gradient descent
+                    input_ids = batch["input_ids"].to(self.device)
+                    attention_mask = batch["attention_mask"].to(self.device)
+                    labels = batch["labels"].to(self.device)
+                    outputs = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
+                    outputs.loss.backward()
+                    torch.nn.utils.clip_grad_norm_(
+                        [p for p in model.parameters() if p.requires_grad],
+                        CONFIG["max_grad_norm"],
+                    )
+                    loss_val = outputs.loss.item()
 
                 optimizer.step()
                 scheduler.step()
-                optimizer.zero_grad()
 
-                total_loss += outputs.loss.item()
+                total_loss += loss_val
                 num_batches += 1
                 step += 1
                 pbar.set_postfix(loss=f"{total_loss / num_batches:.4f}")
@@ -419,11 +482,11 @@ class QLoRADPTrainer:
             print(f"  Epoch {epoch+1}/{epochs} - Avg Loss: {avg_loss:.4f}")
 
             if noise_multiplier > 0:
-                epsilon = self._compute_epsilon(step, noise_multiplier)
-                print(f"  Privacy budget: ε = {epsilon:.4f}, δ = 1e-5")
+                final_epsilon = self._compute_epsilon(step, noise_multiplier, n_samples)
+                print(f"  Privacy budget: ε = {final_epsilon:.4f}, δ = 1e-5")
 
         model.eval()
-        return model
+        return model, final_epsilon
 
 
 # ============================================================
@@ -442,7 +505,9 @@ class PrivacyAttack:
         self.tokenizer = tokenizer
         self.device = device
 
-    def generate_email(self, model, name, max_new_tokens=100):
+    def generate_email(self, model, name, max_new_tokens=None):
+        if max_new_tokens is None:
+            max_new_tokens = CONFIG.get("max_new_tokens", 100)
         prompt = self.PROMPT_TEMPLATE.format(name=name)
         input_ids = self.tokenizer.encode(prompt, return_tensors="pt").to(self.device)
 
@@ -533,12 +598,18 @@ def run_experiment():
             print(f"\n  Skipping σ={noise} (already complete)")
             continue
 
-        model = trainer.train(
+        model, epsilon = trainer.train(
             train_texts,
             noise_multiplier=noise,
             epochs=CONFIG["epochs"],
             batch_size=CONFIG["batch_size"],
         )
+
+        # Save model checkpoint so a later crash doesn't require full retraining.
+        checkpoint_dir = os.path.join(CONFIG["output_dir"], f"checkpoints/sigma_{noise}")
+        os.makedirs(checkpoint_dir, exist_ok=True)
+        model.save_pretrained(checkpoint_dir)
+        print(f"  Model checkpoint → {checkpoint_dir}")
 
         attack_rate, correctness, num_extracted = attacker.run_attack(model, attack_pairs)
 
@@ -554,19 +625,23 @@ def run_experiment():
             "privacy_enhancement": privacy_enhancement,
             "correctness": correctness,
             "num_extracted": num_extracted,
+            "epsilon": epsilon if epsilon != float("inf") else None,
+            "delta": 1e-5,
         })
 
         # Write checkpoint after every run so Drive always has the latest state.
         results.sort(key=lambda r: r["noise"])
         with open(results_path, "w") as f:
             json.dump(results, f, indent=2)
-        print(f"  Checkpoint saved → {results_path}")
+        print(f"  Results checkpoint → {results_path}")
 
         print(f"\n  Results for σ={noise}:")
         print(f"    Attack Success Rate:  {attack_rate:.2f}%")
         print(f"    Privacy Enhancement: {privacy_enhancement:.0f}%")
         print(f"    Correctness:         {correctness:.2f}%")
         print(f"    Emails Extracted:    {num_extracted}")
+        if epsilon != float("inf"):
+            print(f"    Privacy budget:      ε = {epsilon:.4f}, δ = 1e-5")
 
         del model
         if torch.cuda.is_available():
@@ -579,18 +654,19 @@ def run_experiment():
 
 def print_results_table(results):
     print("\n")
-    print("=" * 80)
+    print("=" * 90)
     print("Table 11. Comparison of the Attack Success Rate of Traditional Fine-Tuning")
     print("vs. Fine-Tuning with DPFE (QLoRA) at Different Levels of Noise σ")
-    print("=" * 80)
+    print("=" * 90)
 
-    headers = ["Noise (σ)", "Attack Success Rate", "Privacy Enhancement", "Correctness (%)"]
+    headers = ["Noise (σ)", "Attack Success Rate", "Privacy Enhancement", "Correctness (%)", "ε"]
     table_data = [
         [
             str(r["noise"]),
             f"{r['attack_success_rate']:.2f}%" if r["attack_success_rate"] > 0 else "0%",
             f"{r['privacy_enhancement']:.0f}%",
             f"{r['correctness']:.2f}",
+            f"{r['epsilon']:.4f}" if r.get("epsilon") is not None else "∞",
         ]
         for r in results
     ]
@@ -603,7 +679,7 @@ def print_results_table(results):
     print(f"Dataset: ENRON Email Corpus ({CONFIG['max_emails']:,} emails)")
     print(f"Attack pairs: {CONFIG['subset_pairs']:,} (name, email) pairs")
     print("Attack method: Carlini et al. (2022) — prompt-based email extraction")
-    print("Privacy mechanism: DP-SGD on LoRA adapter gradients only")
+    print("Privacy mechanism: DP-SGD on LoRA adapter gradients (per-sample clipping)")
 
 
 if __name__ == "__main__":
