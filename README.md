@@ -47,42 +47,39 @@ The DPFE framework (from the companion paper) fine-tunes foundation models using
 
 ## Model
 
-This experiment uses **GPT-Neo 1.3B** rather than the GPT-2 model from the original paper. The table below compares them:
+This experiment uses **GPT-2 Large** rather than the original GPT-2 (117M) from the paper. The table below compares all three models:
 
-| Property | GPT-2 (original paper) | GPT-Neo 1.3B (this experiment) |
+| Property | GPT-2 (original paper) | GPT-2 Large (this experiment) |
 |---|---|---|
-| Developer | OpenAI | EleutherAI |
-| Year | 2019 | 2021 |
-| Parameters | 117M | 1.3B (11× larger) |
-| Architecture | Transformer decoder | Transformer decoder (GPT-style) |
-| Context window | 1,024 tokens | 2,048 tokens |
-| Pre-training data | WebText (~40 GB) | The Pile (~800 GB, includes ENRON) |
-| ENRON in pre-training | No | **Yes** |
+| Developer | OpenAI | OpenAI |
+| Year | 2019 | 2019 |
+| Parameters | 117M | 774M (6.6× larger) |
+| Architecture | Transformer decoder | Transformer decoder (same family) |
+| Context window | 1,024 tokens | 1,024 tokens |
+| Pre-training data | WebText (~40 GB) | WebText (~40 GB) |
+| ENRON in pre-training | No | No |
 | Weights | Open | Open |
 
-The last row is the most consequential difference for this experiment. GPT-Neo 1.3B was pre-trained on The Pile, which includes the ENRON corpus — meaning it may have already memorized email addresses before fine-tuning begins. GPT-2 had no ENRON exposure at pre-training time, making it a cleaner baseline for isolating what fine-tuning alone causes.
-
-As a result, our attack success rates may be **higher** than the paper's — not because GPT-Neo memorizes more aggressively during fine-tuning, but because leaked addresses may already be present in the base weights and fine-tuning simply reinforces them.
+Using the same model family as the paper means results are directly comparable. Neither model was pre-trained on ENRON data, so any email memorization comes entirely from fine-tuning — which is what the experiment is designed to measure.
 
 ### This experiment's model
 
 | Property | Value |
 |---|---|
-| Model | [EleutherAI/gpt-neo-1.3B](https://huggingface.co/EleutherAI/gpt-neo-1.3B) |
-| Parameters | 1.3 billion (base) |
-| Architecture | Autoregressive transformer (GPT-style) |
-| Pre-training data | The Pile (800GB, includes ENRON corpus) |
-| Fine-tuning method | **QLoRA** — 4-bit NF4 quantized base + LoRA adapters |
-| Trainable parameters | ~4M (LoRA adapters on `q_proj` / `v_proj` only) |
+| Model | [gpt2-large](https://huggingface.co/gpt2-large) |
+| Parameters | 774M |
+| Architecture | Autoregressive transformer (GPT-2 family) |
+| Pre-training data | WebText (~40 GB) |
+| Fine-tuning method | **LoRA** — float16 base + LoRA adapters |
+| Trainable parameters | ~8M (LoRA adapters on `c_attn` Q/K/V projection) |
 
-### Why QLoRA?
+### Why LoRA?
 
-QLoRA (Dettmers et al., 2023) combines two techniques:
+LoRA (Hu et al., 2022) injects small low-rank adapter matrices into the attention layers. Only these ~8M parameters are updated during fine-tuning — the 774M base model weights stay frozen.
 
-- **4-bit NF4 quantization** (`bitsandbytes`) — the 1.3B base model is loaded in 4-bit, reducing memory from ~5GB to ~1GB. The base weights are frozen.
-- **LoRA adapters** (`peft`) — small rank-16 adapter matrices are injected into the attention layers. Only these ~4M parameters are updated during fine-tuning.
+This matters for the DP-SGD privacy mechanism: **noise is added only to the LoRA adapter gradients**. Fewer trainable parameters means the noise-to-signal ratio is much lower, giving a better privacy-utility tradeoff than full fine-tuning at the same noise level.
 
-This matters critically for the DP-SGD privacy mechanism: **noise is added only to the LoRA adapter gradients**, not to all 1.3B parameters. Fewer trainable parameters means the noise-to-signal ratio is much lower, giving better privacy-utility tradeoff than full fine-tuning at the same noise level.
+GPT-2 Large fits comfortably in GPU memory in float16 (~1.5 GB), so no quantization is needed. This avoids the complexity of QLoRA while achieving the same LoRA-based DP-SGD approach.
 
 ---
 
