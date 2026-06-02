@@ -286,12 +286,12 @@ class LoRADPTrainer:
         model.train()
 
         dataset = EmailDataset(train_texts, self.tokenizer, CONFIG["max_length"])
-        print(f"  Dataset size: {len(dataset)}", flush=True) # Added print statement
+        print(f"  Dataset size: {len(dataset)}", flush=True)
         n_samples = len(dataset)
         # drop_last=True ensures uniform batch sizes for Opacus's sampling-rate
         # calculation. At most (batch_size - 1) samples per epoch are discarded.
         dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
-        print(f"  DataLoader has {len(dataloader)} batches (batch_size={batch_size})", flush=True) # Added print statement
+        print(f"  DataLoader has {len(dataloader)} batches (batch_size={batch_size})", flush=True)
 
         optimizer = AdamW(
             filter(lambda p: p.requires_grad, model.parameters()),
@@ -340,6 +340,12 @@ class LoRADPTrainer:
                 print_every = max(1, n_batches // 4)
 
                 for batch_idx, batch in enumerate(active_loader):
+                    # Debugging: Check batch content
+                    if "input_ids" in batch and "attention_mask" in batch:
+                        print(f"  Batch {batch_idx+1}: input_ids shape={batch['input_ids'].shape}, attention_mask shape={batch['attention_mask'].shape}", flush=True)
+                    else:
+                        print(f"  Batch {batch_idx+1}: Missing 'input_ids' or 'attention_mask'", flush=True)
+
                     optimizer.zero_grad()
 
                     outputs = model(
