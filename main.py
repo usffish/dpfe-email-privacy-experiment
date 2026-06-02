@@ -368,6 +368,10 @@ class LoRADPTrainer:
                 data_loader=dataloader,
                 noise_multiplier=noise_multiplier,
                 max_grad_norm=CONFIG["max_grad_norm"],
+                # Poisson sampling creates variable-size lots (expected=batch_size but
+                # tail lots of 3-5× can OOM). Uniform sampling returns the original
+                # DataLoader unchanged — fixed batch sizes, no DPDataLoader dtype bug.
+                poisson_sampling=False,
             )
             print(f"  Opacus active (σ={noise_multiplier}, C={CONFIG['max_grad_norm']})")
 
