@@ -346,8 +346,14 @@ class LoRADPTrainer:
 
         privacy_engine = None
         if noise_multiplier > 0:
-            # Fix any Opacus-incompatible modules (e.g. unsupported layer types)
+            # Fix any Opacus-incompatible modules (e.g. unsupported layer types).
+            # ModuleValidator.fix() replaces modules, invalidating the optimizer's
+            # parameter references — rebuild the optimizer immediately after.
             model = ModuleValidator.fix(model)
+            optimizer = AdamW(
+                filter(lambda p: p.requires_grad, model.parameters()),
+                lr=CONFIG["learning_rate"],
+            )
             privacy_engine = PrivacyEngine()
             model, optimizer, dataloader = privacy_engine.make_private(
                 module=model,
