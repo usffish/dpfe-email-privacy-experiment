@@ -1,6 +1,6 @@
 # DPFE Email Privacy Attack Experiment
 
-Replication and extension of the privacy attack study from **Huang et al. (2022)** — *"Are Large Pre-Trained Language Models Leaking Your Personal Information?"* — using a larger, newer model (GPT-Neo 1.3B) and differential privacy fine-tuning (DPFE) to measure and mitigate email address leakage.
+Replication of the privacy attack study from **Huang et al. (2022)** — *"Are Large Pre-Trained Language Models Leaking Your Personal Information?"* — using **GPT-2 Large** and differential privacy fine-tuning (DPFE) to measure and mitigate email address leakage.
 
 ---
 
@@ -10,7 +10,7 @@ Large language models memorize personal information from their training data. Th
 
 The experiment pipeline:
 
-1. **Fine-tune** GPT-Neo 1.3B on a subset of the ENRON email corpus
+1. **Fine-tune** GPT-2 Large on a subset of the ENRON email corpus
 2. **Attack** the fine-tuned model using a prompt-based extraction strategy (Carlini et al., 2022)
 3. **Repeat** with DP-SGD at increasing noise levels (DPFE framework)
 4. **Report** attack success rate, privacy enhancement, and model correctness — replicating Table 11 from the DPFE paper
@@ -47,23 +47,39 @@ The DPFE framework (from the companion paper) fine-tunes foundation models using
 
 ## Model
 
+This experiment uses **GPT-2 Large** rather than the original GPT-2 (117M) from the paper. The table below compares both models:
+
+| Property | GPT-2 (original paper) | GPT-2 Large (this experiment) |
+|---|---|---|
+| Developer | OpenAI | OpenAI |
+| Year | 2019 | 2019 |
+| Parameters | 117M | 774M (6.6× larger) |
+| Architecture | Transformer decoder | Transformer decoder (same family) |
+| Context window | 1,024 tokens | 1,024 tokens |
+| Pre-training data | WebText (~40 GB) | WebText (~40 GB) |
+| ENRON in pre-training | No | No |
+| Weights | Open | Open |
+
+Using the same model family as the paper means results are directly comparable. Neither model was pre-trained on ENRON data, so any email memorization comes entirely from fine-tuning — which is what the experiment is designed to measure.
+
+### This experiment's model
+
 | Property | Value |
 |---|---|
-| Model | [EleutherAI/gpt-neo-1.3B](https://huggingface.co/EleutherAI/gpt-neo-1.3B) |
-| Parameters | 1.3 billion (base) |
-| Architecture | Autoregressive transformer (GPT-style) |
-| Pre-training data | The Pile (800GB, includes ENRON corpus) |
-| Fine-tuning method | **QLoRA** — 4-bit NF4 quantized base + LoRA adapters |
-| Trainable parameters | ~4M (LoRA adapters on `q_proj` / `v_proj` only) |
+| Model | [gpt2-large](https://huggingface.co/gpt2-large) |
+| Parameters | 774M |
+| Architecture | Autoregressive transformer (GPT-2 family) |
+| Pre-training data | WebText (~40 GB) |
+| Fine-tuning method | **LoRA** — float16 base + LoRA adapters |
+| Trainable parameters | ~8M (LoRA adapters on `c_attn` Q/K/V projection) |
 
-### Why QLoRA?
+### Why LoRA?
 
-QLoRA (Dettmers et al., 2023) combines two techniques:
+LoRA (Hu et al., 2021) injects small low-rank adapter matrices into the attention layers. Only these ~8M parameters are updated during fine-tuning — the 774M base model weights stay frozen.
 
-- **4-bit NF4 quantization** (`bitsandbytes`) — the 1.3B base model is loaded in 4-bit, reducing memory from ~5GB to ~1GB. The base weights are frozen.
-- **LoRA adapters** (`peft`) — small rank-16 adapter matrices are injected into the attention layers. Only these ~4M parameters are updated during fine-tuning.
+This matters for the DP-SGD privacy mechanism: **noise is added only to the LoRA adapter gradients**. Fewer trainable parameters means the noise-to-signal ratio is much lower, giving a better privacy-utility tradeoff than full fine-tuning at the same noise level.
 
-This matters critically for the DP-SGD privacy mechanism: **noise is added only to the LoRA adapter gradients**, not to all 1.3B parameters. Fewer trainable parameters means the noise-to-signal ratio is much lower, giving better privacy-utility tradeoff than full fine-tuning at the same noise level.
+GPT-2 Large fits comfortably in GPU memory in float16 (~1.5 GB), so no quantization is needed.
 
 ---
 
@@ -84,20 +100,17 @@ wget https://www.cs.cmu.edu/~enron/enron_mail_20150507.tar.gz
 tar -xzf enron_mail_20150507.tar.gz -C enron_data/
 ```
 
-If the data is not present, the script will automatically generate a synthetic dataset that mimics the ENRON structure for demonstration purposes.
+If the data is not present, the script raises an error — download the corpus before running.
 
 ---
 
 ## Installation
 
-Requires Python ≥ 3.11.
+Requires Python ≥ 3.11 and a CUDA GPU.
 
 ```bash
 pip install -r requirements.txt
 ```
-
-- **CUDA GPU** — required for 4-bit quantization (`bitsandbytes`). Runs the full QLoRA pipeline.
-- **Apple MPS / CPU** — automatically falls back to full-precision LoRA (no quantization). Slower but functional.
 
 ---
 
@@ -109,7 +122,7 @@ python main.py
 
 The script will:
 
-1. Load (or generate) the email dataset
+1. Load the ENRON email dataset
 2. Train five model variants — one non-private baseline and four with increasing DP-SGD noise levels
 3. Run the privacy attack against each variant
 4. Print the results table and save it to `results/table_11_results.json`
@@ -120,7 +133,7 @@ All hyperparameters can be set in `.env` (copy from the table below). The file i
 
 | `.env` key | Default | Description |
 |---|---|---|
-| `MODEL_NAME` | `EleutherAI/gpt-neo-1.3B` | HuggingFace model ID |
+| `MODEL_NAME` | `gpt2-large` | HuggingFace model ID |
 | `BATCH_SIZE` | `16` | Training batch size |
 | `EPOCHS` | `3` | Fine-tuning epochs |
 | `LEARNING_RATE` | `5e-5` | AdamW learning rate |
@@ -149,7 +162,7 @@ The experiment produces a table in the format of Table 11 from the DPFE paper:
 | 0.002 | 0.19% | 84% | 96.51 |
 | 0.005 | 0% | 100% | 94.78 |
 
-*Reference values from the DPFE paper (GPT-2, ENRON). Results with GPT-Neo 1.3B may differ.*
+*Reference values from the DPFE paper (GPT-2, ENRON). Results with GPT-2 Large may differ.*
 
 **Attack success rate** — percentage of the 3,238 name-email pairs where the model correctly reproduced the exact email address when prompted with the owner's name.
 
@@ -161,40 +174,28 @@ The experiment produces a table in the format of Table 11 from the DPFE paper:
 
 ## Running on USF CIRCE
 
-CIRCE compute nodes have no outbound internet access, so the model weights must be pre-downloaded on a login node before submitting a job.
+See the `circe` branch for the full CIRCE-specific setup and documentation.
 
-### Step 1 — Copy the project to scratch
-
-```bash
-cp -r dpfe-email-privacy-experiment /scratch/${USER}/
-cd /scratch/${USER}/dpfe-email-privacy-experiment
-mkdir -p logs
-```
-
-### Step 2 — Pre-download the model (login node)
+Quick reference:
 
 ```bash
-module load python/3.11 cuda/12.1
-export HF_HOME=/scratch/${USER}/hf_cache
-python download_model.py
-```
-
-This downloads GPT-Neo 1.3B (~2.6 GB) into scratch so it doesn't count against your home directory quota.
-
-### Step 3 — Submit the job
-
-```bash
+# On the login node
+git clone https://github.com/usffish/dpfe-email-privacy-experiment.git
+git -C dpfe-email-privacy-experiment checkout circe
+cd dpfe-email-privacy-experiment
+export HF_HOME=~/hf_cache
+conda activate my_environment
+python download_model.py   # download GPT-2 Large (~3 GB) before job submission
 sbatch run.sbatch
 ```
 
-Check status with `squeue -u ${USER}`. Logs are written to `logs/<job_id>.out`.
+---
 
-### CIRCE-specific notes
+## Running on Google Colab
 
-- **CUDA module** — `run.sbatch` loads `cuda/12.1` by default. Check available versions with `module avail cuda` and update the script if needed.
-- **GPU partition** — the script requests `--partition=gpu`. CIRCE may require a specific partition name; check with `sinfo` or the [CIRCE docs](https://www.usf.edu/research-innovation/research-computing/circe/).
-- **Scratch storage** — model weights, ENRON data, and results all live under `/scratch/${USER}/` to avoid home directory quota limits.
-- **`bitsandbytes`** — 4-bit quantization is Linux/CUDA-native and works without modification on CIRCE.
+See the `colab` branch, which includes `dpfe_colab.ipynb` — a self-contained notebook that handles setup, ENRON download, and the full experiment run.
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/usffish/dpfe-email-privacy-experiment/blob/colab/dpfe_colab.ipynb)
 
 ---
 
@@ -219,6 +220,5 @@ Check status with `squeue -u ${USER}`. Logs are written to `logs/<job_id>.out`.
 - Huang, J., Shao, H., & Chang, K.C.C. (2022). *Are Large Pre-Trained Language Models Leaking Your Personal Information?* arXiv:2205.12628
 - Carlini, N., et al. (2022). *Quantifying Memorization Across Neural Language Models.* arXiv:2202.07646
 - Abadi, M., et al. (2016). *Deep Learning with Differential Privacy.* ACM CCS 2016.
-- Dettmers, T., et al. (2023). *QLoRA: Efficient Finetuning of Quantized LLMs.* NeurIPS 2023.
+- Hu, E.J., et al. (2021). *LoRA: Low-Rank Adaptation of Large Language Models.* arXiv:2106.09685
 - Klimt, B., & Yang, Y. (2004). *The Enron Corpus: A New Dataset for Email Classification Research.* ECML 2004.
-- Black, S., et al. (2021). *GPT-Neo: Large Scale Autoregressive Language Modeling with Mesh-Tensorflow.*
