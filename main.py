@@ -430,9 +430,12 @@ class LoRADPTrainer:
                 eps_str = f"{final_epsilon:.4f}" if final_epsilon != float("inf") else "∞"
                 print(f"  Privacy budget: ε = {eps_str}, δ = 1e-5")
 
-        # Unwrap Opacus GradSampleModule before returning
+        # Unwrap Opacus GradSampleModule before returning.
+        # Opacus >= 1.0 no longer exposes .module on PrivacyEngine;
+        # the GradSampleModule returned by make_private() holds the
+        # original model at ._module.
         if privacy_engine is not None:
-            model = privacy_engine.module
+            model = model._module
 
         model.eval()
         return model, final_epsilon
