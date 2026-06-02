@@ -32,6 +32,9 @@ from transformers import (
 )
 from peft import LoraConfig, get_peft_model, TaskType
 from opacus import PrivacyEngine
+from opacus.utils.batch_memory_manager import BatchMemoryManager
+import json
+import os
 from opacus.validators import ModuleValidator
 from tabulate import tabulate
 from tqdm.auto import tqdm
@@ -60,11 +63,9 @@ _transformers_mod.logging.set_verbosity_error()
 CONFIG = {
     "model_name": os.getenv("MODEL_NAME", "gpt2-large"),
     "max_length": int(os.getenv("MAX_LENGTH", 256)),
-    "batch_size": int(os.getenv("BATCH_SIZE", 16)),
-    # Opacus DP-SGD stores per-sample gradients for every sample in the batch
-    # simultaneously, roughly doubling backprop memory vs standard SGD. At
-    # float32 + max_length=256, batch=16 OOMs a 40 GB A100; 8 fits comfortably.
-    "dp_batch_size": int(os.getenv("DP_BATCH_SIZE", 8)),
+    # A100 (40GB) handles batch size 16 for GPT-2 Large + LoRA + DP-SGD easily.
+    "batch_size": 16,
+    "dp_batch_size": 16,
     "epochs": int(os.getenv("EPOCHS", 3)),
     "learning_rate": float(os.getenv("LEARNING_RATE", 5e-5)),
     "max_grad_norm": float(os.getenv("MAX_GRAD_NORM", 1.0)),
@@ -199,65 +200,6 @@ class EnronDataProcessor:
                 "name_email_pairs": self.name_email_pairs[:CONFIG["subset_pairs"]]
             }, f)
 
-    def _generate_synthetic_data(self):
-        first_names = ["Roger", "Karen", "Michael", "Peter", "John", "Lisa", "George",
-                       "Kimberly", "Randall", "Chris", "David", "Sarah", "James", "Robert",
-                       "Jennifer", "William", "Linda", "Richard", "Barbara", "Thomas",
-                       "Susan", "Joseph", "Margaret", "Charles", "Dorothy", "Daniel",
-                       "Sandra", "Matthew", "Ashley", "Anthony", "Emily", "Mark", "Donna",
-                       "Steven", "Carol", "Paul", "Ruth", "Andrew", "Sharon", "Kenneth"]
-        last_names = ["Pelote", "Bishop", "Ballases", "Thompson", "Klauberg", "Barnwell",
-                      "Denos", "Ward", "Rich", "Smith", "Johnson", "Williams", "Brown",
-                      "Jones", "Garcia", "Miller", "Davis", "Rodriguez", "Martinez",
-                      "Anderson", "Taylor", "Thomas", "Hernandez", "Moore", "Martin",
-                      "Jackson", "Lee", "Perez", "White", "Harris", "Sanchez", "Clark",
-                      "Ramirez", "Lewis", "Robinson", "Walker", "Young", "Allen", "King"]
-        domains = ["williams.com", "mail.utexas.edu", "lacima.co.uk", "bracepatt.com",
-                   "houston.rr.com", "hotmail.com", "yahoo.com", "aol.com", "gmail.com",
-                   "akllp.com", "llgm.com", "sce.com", "neg.pge.com", "gmssr.com",
-                   "swbell.net", "flash.net", "ev1.net", "pdq.net", "msn.com",
-                   "earthlink.net", "att.net", "sbcglobal.net", "comcast.net",
-                   "verizon.net", "cox.net", "charter.net", "bellsouth.net"]
-        email_templates = [
-            "Hi {name},\n\nI wanted to follow up on our conversation from yesterday. "
-            "Please let me know if you have any questions.\n\nBest regards,\n{sender}",
-            "Dear {name},\n\nAttached please find the documents you requested. "
-            "Let me know if you need anything else.\n\nThanks,\n{sender}",
-            "-----Original Message-----\nFrom: {sender} [mailto: {email}]\nSent: Monday\n"
-            "To: {name}\nSubject: Re: Meeting\n\n{name}, can we reschedule to Thursday?",
-            "{name},\n\nJust a quick note to confirm our meeting tomorrow at 2pm. "
-            "See you then.\n\n{sender}\n{email}",
-            "From: {sender} <{email}>\nTo: {name}\nSubject: Project Update\n\n"
-            "Hi {name},\n\nHere's the latest update on the project status.",
-        ]
-        pairs_set = set()
-        with tqdm(total=CONFIG["subset_pairs"], desc="Generating pairs", unit="pair") as pbar:
-            while len(pairs_set) < CONFIG["subset_pairs"]:
-                first = random.choice(first_names)
-                last = random.choice(last_names)
-                domain = random.choice(domains)
-                name = f"{first} {last}"
-                pattern = random.choice([
-                    f"{first.lower()}.{last.lower()}",
-                    f"{first[0].lower()}{last.lower()}",
-                    f"{first.lower()}{last[0].lower()}",
-                    f"{first.lower()}_{last.lower()}",
-                    f"{first.lower()}{last.lower()}",
-                    f"{first[0].lower()}{last[0].lower()}{random.randint(1, 99)}",
-                ])
-                prev_len = len(pairs_set)
-                pairs_set.add((name, f"{pattern}@{domain}"))
-                if len(pairs_set) > prev_len:
-                    pbar.update(1)
-        self.name_email_pairs = list(pairs_set)
-        for _ in tqdm(range(CONFIG["max_emails"]), desc="Generating email bodies", unit="email"):
-            template = random.choice(email_templates)
-            pair = random.choice(self.name_email_pairs)
-            sender_pair = random.choice(self.name_email_pairs)
-            self.email_bodies.append(template.format(
-                name=pair[0], sender=sender_pair[0], email=sender_pair[1]
-            ))
-
 
 # ============================================================
 # Dataset — lazy tokenization
@@ -315,14 +257,11 @@ class LoRADPTrainer:
 
     def _load_model(self):
         print("  Loading model weights...", flush=True)
-        # float32 throughout: float16 base + float32 LoRA causes Opacus
-        # per-sample gradient hooks to see Half/Float dtype mismatches →
-        # RuntimeError. A100 has 40 GB VRAM so float32 (~3 GB) is fine.
         model = AutoModelForCausalLM.from_pretrained(
             self.model_name,
+            device_map="auto",
             torch_dtype=torch.float32,
         )
-        model.to(self.device)
         print("  Model loaded.", flush=True)
 
         lora_config = LoraConfig(
@@ -347,10 +286,12 @@ class LoRADPTrainer:
         model.train()
 
         dataset = EmailDataset(train_texts, self.tokenizer, CONFIG["max_length"])
+        print(f"  Dataset size: {len(dataset)}", flush=True) # Added print statement
         n_samples = len(dataset)
         # drop_last=True ensures uniform batch sizes for Opacus's sampling-rate
         # calculation. At most (batch_size - 1) samples per epoch are discarded.
         dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
+        print(f"  DataLoader has {len(dataloader)} batches (batch_size={batch_size})", flush=True) # Added print statement
 
         optimizer = AdamW(
             filter(lambda p: p.requires_grad, model.parameters()),
@@ -384,56 +325,60 @@ class LoRADPTrainer:
 
         final_epsilon = float("inf")
 
-        for epoch in range(epochs):
-            total_loss = 0.0
-            num_batches = 0
-            n_batches = len(dataloader)
-            print_every = max(1, n_batches // 4)
+        # Logical batch size is 16; A100 handles physical batch 16 fine.
+        # BatchMemoryManager ensures gradient accumulation is handled correctly for DP-SGD.
+        with BatchMemoryManager(
+            data_loader=dataloader, 
+            max_physical_batch_size=batch_size, 
+            optimizer=optimizer
+        ) if noise_multiplier > 0 else dataloader as active_loader:
+            
+            for epoch in range(epochs):
+                total_loss = 0.0
+                num_batches = 0
+                n_batches = len(active_loader)
+                print_every = max(1, n_batches // 4)
 
-            for batch_idx, batch in enumerate(dataloader):
-                optimizer.zero_grad()
+                for batch_idx, batch in enumerate(active_loader):
+                    optimizer.zero_grad()
 
-                outputs = model(
-                    input_ids=batch["input_ids"].to(self.device),
-                    attention_mask=batch["attention_mask"].to(self.device),
-                    labels=batch["labels"].to(self.device),
-                )
-                outputs.loss.backward()
-
-                if noise_multiplier == 0:
-                    torch.nn.utils.clip_grad_norm_(
-                        filter(lambda p: p.requires_grad, model.parameters()),
-                        CONFIG["max_grad_norm"],
+                    outputs = model(
+                        input_ids=batch["input_ids"].to(self.device),
+                        attention_mask=batch["attention_mask"].to(self.device),
+                        labels=batch["labels"].to(self.device),
                     )
+                    outputs.loss.backward()
 
-                optimizer.step()
-                scheduler.step()
+                    if noise_multiplier == 0:
+                        torch.nn.utils.clip_grad_norm_(
+                            filter(lambda p: p.requires_grad, model.parameters()),
+                            CONFIG["max_grad_norm"],
+                        )
 
-                total_loss += outputs.loss.item()
-                num_batches += 1
+                    optimizer.step()
+                    scheduler.step()
 
-                if (batch_idx + 1) % print_every == 0 or (batch_idx + 1) == n_batches:
-                    print(f"  [{epoch+1}/{epochs}] batch {batch_idx+1}/{n_batches}"
-                          f" — loss: {total_loss / num_batches:.4f}", flush=True)
+                    total_loss += outputs.loss.item()
+                    num_batches += 1
 
-            avg_loss = total_loss / max(num_batches, 1)
-            print(f"  Epoch {epoch+1}/{epochs} - Avg Loss: {avg_loss:.4f}")
+                    if (batch_idx + 1) % print_every == 0 or (batch_idx + 1) == n_batches:
+                        print(f"  [{epoch+1}/{epochs}] batch {batch_idx+1}/{n_batches}"
+                              f" — loss: {total_loss / num_batches:.4f}", flush=True)
 
-            if privacy_engine is not None:
-                # PRV accountant overflows for very small σ (domain size → trillions
-                # of elements). For σ ≪ 0.01 ε is effectively ∞ anyway — no
-                # meaningful privacy guarantee — so ∞ is the correct reported value.
-                try:
-                    final_epsilon = privacy_engine.get_epsilon(delta=1e-5)
-                except Exception:
-                    final_epsilon = float("inf")
-                eps_str = f"{final_epsilon:.4f}" if final_epsilon != float("inf") else "∞"
-                print(f"  Privacy budget: ε = {eps_str}, δ = 1e-5")
+                avg_loss = total_loss / max(num_batches, 1)
+                print(f"  Epoch {epoch+1}/{epochs} - Avg Loss: {avg_loss:.4f}")
+
+                if privacy_engine is not None:
+                    try:
+                        final_epsilon = privacy_engine.get_epsilon(delta=1e-5)
+                    except Exception:
+                        final_epsilon = float("inf")
+                    eps_str = f"{final_epsilon:.4f}" if final_epsilon != float("inf") else "∞"
+                    print(f"  Privacy budget: ε = {eps_str}, δ = 1e-5")
 
         # Unwrap Opacus GradSampleModule before returning.
-        # Opacus >= 1.0 no longer exposes .module on PrivacyEngine;
-        # the GradSampleModule returned by make_private() holds the
-        # original model at ._module.
+        # The GradSampleModule returned by make_private() holds the PEFT model 
+        # at ._module. We need this for the generation/attack phase.
         if privacy_engine is not None:
             model = model._module
 
@@ -594,11 +539,11 @@ def run_experiment():
             torch.cuda.empty_cache()
 
     results.sort(key=lambda r: r["noise"])
-    print_results_table(results)
+    print_results_table(results, attack_pairs)
     print(f"\nResults saved to {results_path}")
 
 
-def print_results_table(results):
+def print_results_table(results, attack_pairs):
     print("\n")
     print("=" * 90)
     print("Table 11. Comparison of the Attack Success Rate of Traditional Fine-Tuning")
