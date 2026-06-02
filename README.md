@@ -47,42 +47,35 @@ The DPFE framework (from the companion paper) fine-tunes foundation models using
 
 ## Model
 
-This experiment uses **GPT-Neo 1.3B** rather than the GPT-2 model from the original paper. The table below compares them:
+This experiment uses **GPT-2 Large** rather than the original GPT-2 (117M) from the paper. The table below compares them:
 
-| Property | GPT-2 (original paper) | GPT-Neo 1.3B (this experiment) |
+| Property | GPT-2 (original paper) | GPT-2 Large (this experiment) |
 |---|---|---|
-| Developer | OpenAI | EleutherAI |
-| Year | 2019 | 2021 |
-| Parameters | 117M | 1.3B (11× larger) |
-| Architecture | Transformer decoder | Transformer decoder (GPT-style) |
-| Context window | 1,024 tokens | 2,048 tokens |
-| Pre-training data | WebText (~40 GB) | The Pile (~800 GB, includes ENRON) |
-| ENRON in pre-training | No | **Yes** |
+| Developer | OpenAI | OpenAI |
+| Year | 2019 | 2019 |
+| Parameters | 117M | 774M (6.6× larger) |
+| Architecture | Transformer decoder | Transformer decoder (same family) |
+| Context window | 1,024 tokens | 1,024 tokens |
+| Pre-training data | WebText (~40 GB) | WebText (~40 GB) |
+| ENRON in pre-training | No | No |
 | Weights | Open | Open |
 
-The last row is the most consequential difference for this experiment. GPT-Neo 1.3B was pre-trained on The Pile, which includes the ENRON corpus — meaning it may have already memorized email addresses before fine-tuning begins. GPT-2 had no ENRON exposure at pre-training time, making it a cleaner baseline for isolating what fine-tuning alone causes.
-
-As a result, our attack success rates may be **higher** than the paper's — not because GPT-Neo memorizes more aggressively during fine-tuning, but because leaked addresses may already be present in the base weights and fine-tuning simply reinforces them.
+Same model family as the paper, no ENRON pre-training exposure — memorization comes entirely from fine-tuning, which is what the experiment measures.
 
 ### This experiment's model
 
 | Property | Value |
 |---|---|
-| Model | [EleutherAI/gpt-neo-1.3B](https://huggingface.co/EleutherAI/gpt-neo-1.3B) |
-| Parameters | 1.3 billion (base) |
-| Architecture | Autoregressive transformer (GPT-style) |
-| Pre-training data | The Pile (800GB, includes ENRON corpus) |
-| Fine-tuning method | **QLoRA** — 4-bit NF4 quantized base + LoRA adapters |
-| Trainable parameters | ~4M (LoRA adapters on `q_proj` / `v_proj` only) |
+| Model | [gpt2-large](https://huggingface.co/gpt2-large) |
+| Parameters | 774M |
+| Architecture | Autoregressive transformer (GPT-2 family) |
+| Pre-training data | WebText (~40 GB) |
+| Fine-tuning method | **LoRA** — float16 base + LoRA adapters |
+| Trainable parameters | ~8M (LoRA adapters on `c_attn` Q/K/V projection) |
 
-### Why QLoRA?
+### Why LoRA?
 
-QLoRA (Dettmers et al., 2023) combines two techniques:
-
-- **4-bit NF4 quantization** (`bitsandbytes`) — the 1.3B base model is loaded in 4-bit, reducing memory from ~5GB to ~1GB. The base weights are frozen.
-- **LoRA adapters** (`peft`) — small rank-16 adapter matrices are injected into the attention layers. Only these ~4M parameters are updated during fine-tuning.
-
-This matters critically for the DP-SGD privacy mechanism: **noise is added only to the LoRA adapter gradients**, not to all 1.3B parameters. Fewer trainable parameters means the noise-to-signal ratio is much lower, giving better privacy-utility tradeoff than full fine-tuning at the same noise level.
+LoRA injects small low-rank adapter matrices into the attention layers. Only ~8M parameters are updated — the 774M base weights stay frozen. Noise is added only to the LoRA gradients, giving a better privacy-utility tradeoff at the same noise level. GPT-2 Large fits in 8 GB VRAM in float16 (~1.5 GB), so no quantization is needed.
 
 ---
 
@@ -239,50 +232,15 @@ tail -f logs/<jobid>.out # watch live output
 
 ---
 
-### CIRCE-specific issues resolved in this branch
+### CIRCE-specific notes for this branch
 
 #### 1. `$HOME` is unreliable in SLURM jobs
-SLURM inherits environment variables from wherever `sbatch` is called. If submitted via an SSH connection that propagated a different `$HOME` (e.g., from a local Mac), `$HOME`, `$CONDA_PREFIX`, and `$LD_LIBRARY_PATH` all resolve incorrectly. **Fix:** `run.sbatch` sets `REAL_HOME=/home/i/ismailj` as a hardcoded constant and uses it for all paths.
+SLURM inherits environment variables from the submission shell. If submitted via an SSH connection that propagated a different `$HOME` (e.g., from a local Mac), paths resolve incorrectly. **Fix:** `run.sbatch` sets `REAL_HOME=/home/i/ismailj` as a hardcoded constant.
 
-#### 2. `LD_LIBRARY_PATH` must include CUDA libraries from the conda env
-CIRCE's compute nodes in `snsm_itn19` do not load a CUDA module. `bitsandbytes` needs `libcudart.so.11.0`, `libcublas.so.11`, `libcublasLt.so.11`, and `libcusparse.so.11`, all of which ship inside the conda env (via `torch` and `nvidia-cusparse-cu11`). **Fix:** `run.sbatch` exports:
-```bash
-export LD_LIBRARY_PATH=${CONDA_ENV}/lib/python3.11/site-packages/torch/lib:${CONDA_ENV}/lib:${CONDA_ENV}/lib/python3.11/site-packages/nvidia/cusparse/lib
-```
+#### 2. `/work_bgfs` env var purge
+SLURM injects a variable pointing to `/work_bgfs/i/<netid>/`, which is inaccessible on compute nodes. **Fix:** `main.py` removes those env vars at the top before any imports.
 
-#### 3. bitsandbytes crashes with `PermissionError` on `/work_bgfs`
-bitsandbytes 0.41.3 scans **all** environment variables that contain `/` in their value, looking for `libcudart.so`. SLURM injects a variable pointing to `/work_bgfs/i/<netid>/`, which is inaccessible (permission denied). This crashes bitsandbytes at import time. **Fix:** `main.py` purges those env vars before any import:
-```python
-import os as _os
-for _k in list(_os.environ.keys()):
-    if '/work_bgfs' in _os.environ.get(_k, ''):
-        del _os.environ[_k]
-del _os, _k
-```
-
-#### 4. `dispatch_model` calls `.to()` on 4-bit models (accelerate/transformers version mismatch)
-`accelerate 1.13.0` + `transformers 4.38.2` + `bitsandbytes 0.41.3` have a version mismatch: `dispatch_model` calls `model.to(device)` which bitsandbytes 4-bit models forbid. Newer bitsandbytes versions fix this, but only CPU-only wheels ≥ 0.43 are available on CIRCE's PyPI mirror. **Fix:** `main.py` monkey-patches `transformers.modeling_utils.dispatch_model` to catch the `ValueError` and manually move non-quantized parameters and buffers to CUDA:
-```python
-import transformers.modeling_utils as _bnb_patch
-_orig_dispatch = _bnb_patch.dispatch_model
-import bitsandbytes as _bnb
-def _safe_dispatch(mdl, device_map, **kwargs):
-    if getattr(mdl, 'quantization_method', None) is not None:
-        try:
-            return _orig_dispatch(mdl, device_map, **kwargs)
-        except ValueError:
-            mdl.hf_device_map = device_map if isinstance(device_map, dict) else {"": 0}
-            for _n, _p in mdl.named_parameters():
-                if _p.device.type == "cpu" and not isinstance(_p, _bnb.nn.Params4bit):
-                    _p.data = _p.data.cuda()
-            for _m in mdl.modules():
-                for _bn, _b in list(_m._buffers.items()):
-                    if _b is not None and _b.device.type == "cpu":
-                        _m._buffers[_bn] = _b.cuda()
-            return mdl
-    return _orig_dispatch(mdl, device_map, **kwargs)
-_bnb_patch.dispatch_model = _safe_dispatch
-```
+> **Simplified from previous version:** The old QLoRA/bitsandbytes approach required four complex patches (LD_LIBRARY_PATH hacks, dispatch_model monkey-patching, etc.). Switching to plain LoRA with float16 eliminates all of that — only the `/work_bgfs` purge remains.
 
 ---
 

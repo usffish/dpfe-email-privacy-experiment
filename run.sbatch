@@ -20,14 +20,15 @@ export TRANSFORMERS_OFFLINE=1
 export TOKENIZERS_PARALLELISM=false
 export PYTHONUNBUFFERED=1
 
-# Reduced scale for ~4h runtime on GTX 1070 Ti
+# gpt2-large in float16 (~1.5 GB) fits comfortably on the GTX 1070 Ti (8 GB).
+# Reduced email count keeps wall time under 6h for a smoke-test run.
+# For a full-scale experiment matching the paper, set MAX_EMAILS=50000 and EPOCHS=3.
+export MODEL_NAME=gpt2-large
 export MAX_EMAILS=3000
 export EPOCHS=1
 export SUBSET_PAIRS=200
-export MAX_NEW_TOKENS=30
+export MAX_NEW_TOKENS=100
 
-# bitsandbytes needs CUDA/C++ libs from the conda env
-export LD_LIBRARY_PATH=${CONDA_ENV}/lib/python3.11/site-packages/torch/lib:${CONDA_ENV}/lib:${CONDA_ENV}/lib/python3.11/site-packages/nvidia/cusparse/lib
 
 source ${REAL_HOME}/miniconda3/etc/profile.d/conda.sh
 conda activate my_environment
