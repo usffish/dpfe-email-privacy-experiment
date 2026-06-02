@@ -311,10 +311,12 @@ class LoRADPTrainer:
 
     def _load_model(self):
         print("  Loading model weights...", flush=True)
-        dtype = torch.float16 if torch.cuda.is_available() else torch.float32
+        # float32 throughout: mixing float16 base + float32 LoRA causes Opacus
+        # einsum to see Half vs Float activations/backprops → RuntimeError.
+        # GPT-2 Large float32 ≈ 3 GB; safe on 8 GB 1070 Ti at batch_size=4.
         model = AutoModelForCausalLM.from_pretrained(
             self.model_name,
-            torch_dtype=dtype,
+            torch_dtype=torch.float32,
         )
         model.to(self.device)
         print("  Model loaded.", flush=True)
@@ -329,19 +331,12 @@ class LoRADPTrainer:
         )
         model = get_peft_model(model, lora_config)
         model.print_trainable_parameters()
-        # LoRA adapters inherit float16 from the base model. Cast them to float32
-        # so gradients stay float32 — prevents NaN from float16 underflow (σ=0)
-        # and the Opacus dtype mismatch when add_noise() assigns float32 noise to
-        # a float16 param's grad (σ>0). Frozen base weights remain float16.
-        for param in model.parameters():
-            if param.requires_grad:
-                param.data = param.data.float()
         return model
 
     def train(self, train_texts, noise_multiplier=0.0, epochs=3, batch_size=16):
         print(f"\n{'='*60}")
         print(f"Training with noise σ = {noise_multiplier}")
-        print(f"Mode: LoRA (float16) + {'Opacus DP-SGD' if noise_multiplier > 0 else 'standard SGD'}")
+        print(f"Mode: LoRA (float32) + {'Opacus DP-SGD' if noise_multiplier > 0 else 'standard SGD'}")
         print(f"{'='*60}")
 
         model = self._load_model()
@@ -392,15 +387,11 @@ class LoRADPTrainer:
             for batch in pbar:
                 optimizer.zero_grad()
 
-                # autocast keeps matmuls in float16 for speed/memory but forces
-                # log_softmax/cross_entropy into float32, preventing NaN loss on
-                # float16 models (GPT-2 GELU + logit softmax can overflow float16).
-                with torch.cuda.amp.autocast():
-                    outputs = model(
-                        input_ids=batch["input_ids"].to(self.device),
-                        attention_mask=batch["attention_mask"].to(self.device),
-                        labels=batch["labels"].to(self.device),
-                    )
+                outputs = model(
+                    input_ids=batch["input_ids"].to(self.device),
+                    attention_mask=batch["attention_mask"].to(self.device),
+                    labels=batch["labels"].to(self.device),
+                )
                 outputs.loss.backward()
 
                 if noise_multiplier == 0:
