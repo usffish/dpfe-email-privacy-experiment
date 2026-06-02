@@ -33,8 +33,6 @@ from transformers import (
 from peft import LoraConfig, get_peft_model, TaskType
 from opacus import PrivacyEngine
 from opacus.utils.batch_memory_manager import BatchMemoryManager
-import json
-import os
 from opacus.validators import ModuleValidator
 from tabulate import tabulate
 from tqdm.auto import tqdm
@@ -63,9 +61,7 @@ _transformers_mod.logging.set_verbosity_error()
 CONFIG = {
     "model_name": os.getenv("MODEL_NAME", "gpt2-large"),
     "max_length": int(os.getenv("MAX_LENGTH", 256)),
-    # A100 (40GB) handles batch size 16 for GPT-2 Large + LoRA + DP-SGD easily.
-    "batch_size": 16,
-    "dp_batch_size": 16,
+    "batch_size": int(os.getenv("BATCH_SIZE", 16)),
     "epochs": int(os.getenv("EPOCHS", 3)),
     "learning_rate": float(os.getenv("LEARNING_RATE", 5e-5)),
     "max_grad_norm": float(os.getenv("MAX_GRAD_NORM", 1.0)),
@@ -259,9 +255,9 @@ class LoRADPTrainer:
         print("  Loading model weights...", flush=True)
         model = AutoModelForCausalLM.from_pretrained(
             self.model_name,
-            device_map="auto",
             torch_dtype=torch.float32,
         )
+        model.to(self.device)
         print("  Model loaded.", flush=True)
 
         lora_config = LoraConfig(
@@ -325,11 +321,12 @@ class LoRADPTrainer:
 
         final_epsilon = float("inf")
 
-        # Logical batch size is 16; A100 handles physical batch 16 fine.
-        # BatchMemoryManager ensures gradient accumulation is handled correctly for DP-SGD.
+        # BatchMemoryManager splits each logical batch (16) into physical batches of 8.
+        # This halves peak memory from Opacus per-sample gradient storage while keeping
+        # the privacy accounting correct at the logical batch size.
         with BatchMemoryManager(
-            data_loader=dataloader, 
-            max_physical_batch_size=batch_size, 
+            data_loader=dataloader,
+            max_physical_batch_size=max(1, batch_size // 2),
             optimizer=optimizer
         ) if noise_multiplier > 0 else dataloader as active_loader:
             
@@ -340,12 +337,6 @@ class LoRADPTrainer:
                 print_every = max(1, n_batches // 4)
 
                 for batch_idx, batch in enumerate(active_loader):
-                    # Debugging: Check batch content
-                    if "input_ids" in batch and "attention_mask" in batch:
-                        print(f"  Batch {batch_idx+1}: input_ids shape={batch['input_ids'].shape}, attention_mask shape={batch['attention_mask'].shape}", flush=True)
-                    else:
-                        print(f"  Batch {batch_idx+1}: Missing 'input_ids' or 'attention_mask'", flush=True)
-
                     optimizer.zero_grad()
 
                     outputs = model(
@@ -496,12 +487,11 @@ def run_experiment():
             print(f"\n  Skipping σ={noise} (already complete)")
             continue
 
-        batch_size = CONFIG["dp_batch_size"] if noise > 0 else CONFIG["batch_size"]
         model, epsilon = trainer.train(
             train_texts,
             noise_multiplier=noise,
             epochs=CONFIG["epochs"],
-            batch_size=batch_size,
+            batch_size=CONFIG["batch_size"],
         )
 
         checkpoint_dir = os.path.join(CONFIG["output_dir"], f"checkpoints/sigma_{noise}")
