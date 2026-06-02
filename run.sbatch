@@ -20,14 +20,17 @@ export TRANSFORMERS_OFFLINE=1
 export TOKENIZERS_PARALLELISM=false
 export PYTHONUNBUFFERED=1
 
-# gpt2-large in float16 (~1.5 GB) fits comfortably on the GTX 1070 Ti (8 GB).
-# Reduced email count keeps wall time under 6h for a smoke-test run.
-# For a full-scale experiment matching the paper, set MAX_EMAILS=50000 and EPOCHS=3.
+# GTX 1070 Ti (8 GB VRAM). GPT-2 Large float16 weights = ~1.5 GB.
+# batch_size=4, max_length=128 keeps peak activation memory ~2 GB,
+# leaving headroom for Opacus per-sample gradients on LoRA params.
+# Smoke-test: 3000 emails, 1 epoch. Full run: MAX_EMAILS=50000, EPOCHS=3.
 export MODEL_NAME=gpt2-large
 export MAX_EMAILS=3000
 export EPOCHS=1
 export SUBSET_PAIRS=200
 export MAX_NEW_TOKENS=100
+export BATCH_SIZE=4
+export MAX_LENGTH=128
 
 
 source ${REAL_HOME}/miniconda3/etc/profile.d/conda.sh
