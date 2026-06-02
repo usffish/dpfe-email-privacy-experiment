@@ -406,8 +406,15 @@ class LoRADPTrainer:
             print(f"  Epoch {epoch+1}/{epochs} - Avg Loss: {avg_loss:.4f}")
 
             if privacy_engine is not None:
-                final_epsilon = privacy_engine.get_epsilon(delta=1e-5)
-                print(f"  Privacy budget: ε = {final_epsilon:.4f}, δ = 1e-5")
+                # PRV accountant overflows for very small σ (domain size → trillions
+                # of elements). For σ ≪ 0.01 ε is effectively ∞ anyway — no
+                # meaningful privacy guarantee — so ∞ is the correct reported value.
+                try:
+                    final_epsilon = privacy_engine.get_epsilon(delta=1e-5)
+                except Exception:
+                    final_epsilon = float("inf")
+                eps_str = f"{final_epsilon:.4f}" if final_epsilon != float("inf") else "∞"
+                print(f"  Privacy budget: ε = {eps_str}, δ = 1e-5")
 
         # Unwrap Opacus GradSampleModule before returning
         if privacy_engine is not None:
