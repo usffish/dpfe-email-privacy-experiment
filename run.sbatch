@@ -29,7 +29,7 @@ export MAX_EMAILS=3000
 export EPOCHS=1
 export SUBSET_PAIRS=200
 export MAX_NEW_TOKENS=100
-export BATCH_SIZE=4
+export BATCH_SIZE=2
 export MAX_LENGTH=128
 
 
