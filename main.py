@@ -380,11 +380,12 @@ class LoRADPTrainer:
             for batch in pbar:
                 optimizer.zero_grad()
 
-                outputs = model(
-                    input_ids=batch["input_ids"].to(self.device),
-                    attention_mask=batch["attention_mask"].to(self.device),
-                    labels=batch["labels"].to(self.device),
-                )
+                with torch.cuda.amp.autocast():
+                    outputs = model(
+                        input_ids=batch["input_ids"].to(self.device),
+                        attention_mask=batch["attention_mask"].to(self.device),
+                        labels=batch["labels"].to(self.device),
+                    )
                 outputs.loss.backward()
 
                 if noise_multiplier == 0:
