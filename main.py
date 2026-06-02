@@ -176,8 +176,12 @@ class EnronDataProcessor:
             print("Processing ENRON email corpus...")
             self.process_directory(enron_path)
         else:
-            print("ENRON data not found. Generating synthetic dataset...")
-            self._generate_synthetic_data()
+            raise FileNotFoundError(
+                f"ENRON maildir not found at {enron_path}. "
+                "Download the corpus with: "
+                "wget https://www.cs.cmu.edu/~enron/enron_mail_20150507.tar.gz -O enron_data/enron_mail.tar.gz "
+                "&& tar -xzf enron_data/enron_mail.tar.gz -C enron_data/"
+            )
         os.makedirs(self.data_dir, exist_ok=True)
         with open(cache_file, "w") as f:
             json.dump({
