@@ -1,6 +1,6 @@
 # DPFE Email Privacy Attack Experiment
 
-Replication and extension of the privacy attack study from **Huang et al. (2022)** — *"Are Large Pre-Trained Language Models Leaking Your Personal Information?"* — using a larger, newer model (GPT-Neo 1.3B) and differential privacy fine-tuning (DPFE) to measure and mitigate email address leakage.
+Replication of the privacy attack study from **Huang et al. (2022)** — *"Are Large Pre-Trained Language Models Leaking Your Personal Information?"* — using **GPT-2 Large** and differential privacy fine-tuning (DPFE) to measure and mitigate email address leakage.
 
 ---
 
@@ -10,7 +10,7 @@ Large language models memorize personal information from their training data. Th
 
 The experiment pipeline:
 
-1. **Fine-tune** GPT-Neo 1.3B on a subset of the ENRON email corpus
+1. **Fine-tune** GPT-2 Large on a subset of the ENRON email corpus
 2. **Attack** the fine-tuned model using a prompt-based extraction strategy (Carlini et al., 2022)
 3. **Repeat** with DP-SGD at increasing noise levels (DPFE framework)
 4. **Report** attack success rate, privacy enhancement, and model correctness — replicating Table 11 from the DPFE paper
@@ -75,7 +75,11 @@ Same model family as the paper, no ENRON pre-training exposure — memorization 
 
 ### Why LoRA?
 
-LoRA injects small low-rank adapter matrices into the attention layers. Only ~8M parameters are updated — the 774M base weights stay frozen. Noise is added only to the LoRA gradients, giving a better privacy-utility tradeoff at the same noise level. GPT-2 Large fits in 8 GB VRAM in float16 (~1.5 GB), so no quantization is needed.
+LoRA (Hu et al., 2021) injects small low-rank adapter matrices into the attention layers. Only these ~8M parameters are updated during fine-tuning — the 774M base model weights stay frozen.
+
+This matters for the DP-SGD privacy mechanism: **noise is added only to the LoRA adapter gradients**. Fewer trainable parameters means the noise-to-signal ratio is much lower, giving a better privacy-utility tradeoff than full fine-tuning at the same noise level.
+
+GPT-2 Large fits in 8 GB VRAM in float16 (~1.5 GB), so no quantization is needed.
 
 ---
 
@@ -96,20 +100,17 @@ wget https://www.cs.cmu.edu/~enron/enron_mail_20150507.tar.gz
 tar -xzf enron_mail_20150507.tar.gz -C enron_data/
 ```
 
-If the data is not present, the script will automatically generate a synthetic dataset that mimics the ENRON structure for demonstration purposes.
+If the data is not present, the script raises an error — download the corpus before running.
 
 ---
 
 ## Installation
 
-Requires Python ≥ 3.11.
+Requires Python ≥ 3.11 and a CUDA GPU.
 
 ```bash
 pip install -r requirements.txt
 ```
-
-- **CUDA GPU** — required for 4-bit quantization (`bitsandbytes`). Runs the full QLoRA pipeline.
-- **Apple MPS / CPU** — automatically falls back to full-precision LoRA (no quantization). Slower but functional.
 
 ---
 
@@ -121,7 +122,7 @@ python main.py
 
 The script will:
 
-1. Load (or generate) the email dataset
+1. Load the ENRON email dataset
 2. Train five model variants — one non-private baseline and four with increasing DP-SGD noise levels
 3. Run the privacy attack against each variant
 4. Print the results table and save it to `results/table_11_results.json`
@@ -132,7 +133,7 @@ All hyperparameters can be set in `.env` (copy from the table below). The file i
 
 | `.env` key | Default | Description |
 |---|---|---|
-| `MODEL_NAME` | `EleutherAI/gpt-neo-1.3B` | HuggingFace model ID |
+| `MODEL_NAME` | `gpt2-large` | HuggingFace model ID |
 | `BATCH_SIZE` | `16` | Training batch size |
 | `EPOCHS` | `3` | Fine-tuning epochs |
 | `LEARNING_RATE` | `5e-5` | AdamW learning rate |
@@ -161,7 +162,7 @@ The experiment produces a table in the format of Table 11 from the DPFE paper:
 | 0.002 | 0.19% | 84% | 96.51 |
 | 0.005 | 0% | 100% | 94.78 |
 
-*Reference values from the DPFE paper (GPT-2, ENRON). Results with GPT-Neo 1.3B may differ.*
+*Reference values from the DPFE paper (GPT-2, ENRON). Results with GPT-2 Large may differ.*
 
 **Attack success rate** — percentage of the 3,238 name-email pairs where the model correctly reproduced the exact email address when prompted with the owner's name.
 
@@ -184,7 +185,6 @@ This branch contains the working configuration for USF's CIRCE HPC cluster. Seve
 | GPU | NVIDIA GTX 1070 Ti (8 GB, compute capability 6.1) |
 | CUDA driver | 11.3 (via driver 465.27) |
 | Python env | Conda: `my_environment` (Python 3.11) |
-| bitsandbytes | 0.41.3 (highest CUDA-capable version available on CIRCE's PyPI mirror) |
 
 ### Step 1 — Clone into your home directory
 
@@ -200,7 +200,7 @@ mkdir -p dpfe-email-privacy-experiment/logs
 
 ### Note on first-run corpus scan
 
-On the first job submission, the script scans all ~517,000 ENRON files to collect the 3,238 non-ENRON (name, email) attack pairs. This takes an extra **8–10 minutes** but only happens once — results are cached to `enron_data/processed_data.json` and loaded instantly on all subsequent runs.
+On the first job submission, the script scans ENRON files until it collects enough (name, email) attack pairs. Results are cached to `enron_data/processed_data.json` and loaded instantly on all subsequent runs.
 
 ### Step 2 — Pre-download the model (login node only — no internet on compute nodes)
 
@@ -211,7 +211,7 @@ conda activate my_environment
 python download_model.py
 ```
 
-This downloads GPT-Neo 1.3B (~2.6 GB) to `~/hf_cache`.
+This downloads GPT-2 Large (~3 GB) to `~/hf_cache`.
 
 ### Step 3 — Edit `run.sbatch` to set your username
 
@@ -265,6 +265,5 @@ SLURM injects a variable pointing to `/work_bgfs/i/<netid>/`, which is inaccessi
 - Huang, J., Shao, H., & Chang, K.C.C. (2022). *Are Large Pre-Trained Language Models Leaking Your Personal Information?* arXiv:2205.12628
 - Carlini, N., et al. (2022). *Quantifying Memorization Across Neural Language Models.* arXiv:2202.07646
 - Abadi, M., et al. (2016). *Deep Learning with Differential Privacy.* ACM CCS 2016.
-- Dettmers, T., et al. (2023). *QLoRA: Efficient Finetuning of Quantized LLMs.* NeurIPS 2023.
+- Hu, E.J., et al. (2021). *LoRA: Low-Rank Adaptation of Large Language Models.* arXiv:2106.09685
 - Klimt, B., & Yang, Y. (2004). *The Enron Corpus: A New Dataset for Email Classification Research.* ECML 2004.
-- Black, S., et al. (2021). *GPT-Neo: Large Scale Autoregressive Language Modeling with Mesh-Tensorflow.*
