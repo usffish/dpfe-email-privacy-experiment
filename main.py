@@ -353,6 +353,12 @@ class LoRADPTrainer:
         privacy_engine = None
         if noise_multiplier > 0:
             model = ModuleValidator.fix(model)
+            # Rebuild optimizer after ModuleValidator.fix() — it replaces modules,
+            # invalidating the parameter references the original optimizer held.
+            optimizer = AdamW(
+                filter(lambda p: p.requires_grad, model.parameters()),
+                lr=CONFIG["learning_rate"],
+            )
             privacy_engine = PrivacyEngine()
             model, optimizer, dataloader = privacy_engine.make_private(
                 module=model,
