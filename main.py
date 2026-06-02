@@ -40,6 +40,10 @@ from email.utils import parseaddr
 import warnings
 warnings.filterwarnings("ignore")
 
+# Reduce CUDA allocator fragmentation — recommended by PyTorch when
+# "reserved but unallocated" memory is large (common with Opacus).
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
 # Suppress verbose HuggingFace output
 os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
 import logging as _logging
@@ -57,6 +61,10 @@ CONFIG = {
     "model_name": os.getenv("MODEL_NAME", "gpt2-large"),
     "max_length": int(os.getenv("MAX_LENGTH", 256)),
     "batch_size": int(os.getenv("BATCH_SIZE", 16)),
+    # Opacus DP-SGD stores per-sample gradients for every sample in the batch
+    # simultaneously, roughly doubling backprop memory vs standard SGD. At
+    # float32 + max_length=256, batch=16 OOMs a 40 GB A100; 8 fits comfortably.
+    "dp_batch_size": int(os.getenv("DP_BATCH_SIZE", 8)),
     "epochs": int(os.getenv("EPOCHS", 3)),
     "learning_rate": float(os.getenv("LEARNING_RATE", 5e-5)),
     "max_grad_norm": float(os.getenv("MAX_GRAD_NORM", 1.0)),
@@ -527,11 +535,12 @@ def run_experiment():
             print(f"\n  Skipping σ={noise} (already complete)")
             continue
 
+        batch_size = CONFIG["dp_batch_size"] if noise > 0 else CONFIG["batch_size"]
         model, epsilon = trainer.train(
             train_texts,
             noise_multiplier=noise,
             epochs=CONFIG["epochs"],
-            batch_size=CONFIG["batch_size"],
+            batch_size=batch_size,
         )
 
         checkpoint_dir = os.path.join(CONFIG["output_dir"], f"checkpoints/sigma_{noise}")
