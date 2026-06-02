@@ -150,6 +150,13 @@ class EnronDataProcessor:
                     pbar.update(1)
                     pbar.set_postfix(bodies=body_count, pairs=len(self.name_email_pairs),
                                      refresh=False)
+                    # Stop as soon as we have enough of both — no need to scan all 517k files.
+                    if (body_count >= CONFIG["max_emails"] and
+                            len(self.name_email_pairs) >= CONFIG["subset_pairs"] * 2):
+                        break
+                else:
+                    continue
+                break
         self.name_email_pairs = list(set(self.name_email_pairs))
 
     def load_or_create_synthetic_data(self):
