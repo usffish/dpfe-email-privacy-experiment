@@ -329,6 +329,13 @@ class LoRADPTrainer:
         )
         model = get_peft_model(model, lora_config)
         model.print_trainable_parameters()
+        # LoRA adapters inherit float16 from the base model. Cast them to float32
+        # so gradients stay float32 — prevents NaN from float16 underflow (σ=0)
+        # and the Opacus dtype mismatch when add_noise() assigns float32 noise to
+        # a float16 param's grad (σ>0). Frozen base weights remain float16.
+        for param in model.parameters():
+            if param.requires_grad:
+                param.data = param.data.float()
         return model
 
     def train(self, train_texts, noise_multiplier=0.0, epochs=3, batch_size=16):
