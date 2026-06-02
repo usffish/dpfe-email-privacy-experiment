@@ -135,38 +135,41 @@ class EnronDataProcessor:
             r'([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})\s*\]',
             re.IGNORECASE
         )
-        with tqdm(desc="Scanning ENRON corpus", unit="file") as pbar:
-            for dirpath, dirnames, filenames in os.walk(root_dir):
-                for filename in filenames:
-                    filepath = os.path.join(dirpath, filename)
-                    body, name, addr = self.parse_email_file(filepath)
-                    if body and len(body.strip()) > 50 and body_count < CONFIG["max_emails"]:
-                        self.email_bodies.append(body.strip())
-                        body_count += 1
-                    if name and addr and "@" in addr:
-                        if "enron.com" not in addr.lower():
-                            if len(name.split()) <= 3 and len(name.strip()) > 0:
-                                self.name_email_pairs.append((name.strip(), addr.strip().lower()))
-                    if body:
-                        for m in mailto_re.finditer(body):
-                            found_name = m.group(1).strip().rstrip('.')
-                            found_addr = m.group(2).strip().lower()
-                            if ('enron.com' not in found_addr and
-                                    len(found_name.split()) <= 4 and
-                                    len(found_name) >= 2):
-                                self.name_email_pairs.append((found_name, found_addr))
-                    pbar.update(1)
-                    pbar.set_postfix(bodies=body_count, pairs=len(self.name_email_pairs),
-                                     refresh=False)
-                    # Stop as soon as we have enough of both — no need to scan all 517k files.
-                    # Use *6 headroom: the early part of the corpus has ~60–70% duplicate pairs,
-                    # so we need many more raw pairs than unique ones.
-                    if (body_count >= CONFIG["max_emails"] and
-                            len(self.name_email_pairs) >= CONFIG["subset_pairs"] * 6):
-                        break
-                else:
-                    continue
-                break
+        file_count = 0
+        for dirpath, dirnames, filenames in os.walk(root_dir):
+            for filename in filenames:
+                filepath = os.path.join(dirpath, filename)
+                body, name, addr = self.parse_email_file(filepath)
+                if body and len(body.strip()) > 50 and body_count < CONFIG["max_emails"]:
+                    self.email_bodies.append(body.strip())
+                    body_count += 1
+                if name and addr and "@" in addr:
+                    if "enron.com" not in addr.lower():
+                        if len(name.split()) <= 3 and len(name.strip()) > 0:
+                            self.name_email_pairs.append((name.strip(), addr.strip().lower()))
+                if body:
+                    for m in mailto_re.finditer(body):
+                        found_name = m.group(1).strip().rstrip('.')
+                        found_addr = m.group(2).strip().lower()
+                        if ('enron.com' not in found_addr and
+                                len(found_name.split()) <= 4 and
+                                len(found_name) >= 2):
+                            self.name_email_pairs.append((found_name, found_addr))
+                file_count += 1
+                if file_count % 10000 == 0:
+                    print(f"  Scanned {file_count:,} files — "
+                          f"bodies: {body_count}, pairs: {len(self.name_email_pairs)}", flush=True)
+                # Stop as soon as we have enough of both — no need to scan all 517k files.
+                # Use *6 headroom: the early part of the corpus has ~60–70% duplicate pairs,
+                # so we need many more raw pairs than unique ones.
+                if (body_count >= CONFIG["max_emails"] and
+                        len(self.name_email_pairs) >= CONFIG["subset_pairs"] * 6):
+                    break
+            else:
+                continue
+            break
+        print(f"  Scan complete — {file_count:,} files, "
+              f"bodies: {body_count}, pairs: {len(self.name_email_pairs)}", flush=True)
         self.name_email_pairs = list(set(self.name_email_pairs))
 
     def load_or_create_synthetic_data(self):
@@ -384,10 +387,10 @@ class LoRADPTrainer:
         for epoch in range(epochs):
             total_loss = 0.0
             num_batches = 0
-            pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}", unit="batch",
-                        mininterval=30, miniters=50)
+            n_batches = len(dataloader)
+            print_every = max(1, n_batches // 4)
 
-            for batch in pbar:
+            for batch_idx, batch in enumerate(dataloader):
                 optimizer.zero_grad()
 
                 outputs = model(
@@ -398,7 +401,6 @@ class LoRADPTrainer:
                 outputs.loss.backward()
 
                 if noise_multiplier == 0:
-                    # Clip for baseline (Opacus clips automatically when active)
                     torch.nn.utils.clip_grad_norm_(
                         filter(lambda p: p.requires_grad, model.parameters()),
                         CONFIG["max_grad_norm"],
@@ -409,7 +411,10 @@ class LoRADPTrainer:
 
                 total_loss += outputs.loss.item()
                 num_batches += 1
-                pbar.set_postfix(loss=f"{total_loss / num_batches:.4f}")
+
+                if (batch_idx + 1) % print_every == 0 or (batch_idx + 1) == n_batches:
+                    print(f"  [{epoch+1}/{epochs}] batch {batch_idx+1}/{n_batches}"
+                          f" — loss: {total_loss / num_batches:.4f}", flush=True)
 
             avg_loss = total_loss / max(num_batches, 1)
             print(f"  Epoch {epoch+1}/{epochs} - Avg Loss: {avg_loss:.4f}")
@@ -469,14 +474,16 @@ class PrivacyAttack:
         successful = 0
         valid_format = 0
         total = len(name_email_pairs)
-        pbar = tqdm(name_email_pairs, desc="Privacy attack", unit="pair")
-        for name, true_email in pbar:
+        print_every = max(1, total // 4)
+        for i, (name, true_email) in enumerate(name_email_pairs):
             predicted = self.generate_email(model, name)
             if predicted:
                 valid_format += 1
                 if predicted == true_email.lower():
                     successful += 1
-            pbar.set_postfix(hits=successful, rate=f"{successful / max(pbar.n, 1) * 100:.2f}%")
+            if (i + 1) % print_every == 0 or (i + 1) == total:
+                print(f"  Attack {i+1}/{total} — hits: {successful},"
+                      f" rate: {successful/(i+1)*100:.2f}%", flush=True)
         attack_rate = successful / total * 100
         correctness = valid_format / total * 100
         return attack_rate, correctness, successful
