@@ -283,7 +283,7 @@ class LoRADPTrainer:
     Fine-tune GPT-2 Large with LoRA and optional DP-SGD via Opacus.
 
     LoRA setup:
-      - Base model loaded in float16, frozen (no gradients on base weights)
+      - Base model loaded in float32, frozen (no gradients on base weights)
       - LoRA adapters injected on c_attn (Q/K/V) layers — only trained params
       - ~8M trainable parameters vs 774M total
 
@@ -483,7 +483,7 @@ def run_experiment():
 
     print("=" * 60)
     print("DPFE Email Privacy Attack Experiment")
-    print(f"Model: {CONFIG['model_name']} — LoRA (float16)")
+    print(f"Model: {CONFIG['model_name']} — LoRA (float32)")
     print(f"LoRA: r={CONFIG['lora_r']}, alpha={CONFIG['lora_alpha']}, "
           f"targets={CONFIG['lora_target_modules']}")
     print(f"Device: {CONFIG['device']}")
@@ -600,7 +600,7 @@ def print_results_table(results):
     print(tabulate(table_data, headers=headers, tablefmt="grid", stralign="center"))
     print()
     print(f"Model: {CONFIG['model_name']} (774M parameters)")
-    print(f"LoRA: float16 | r={CONFIG['lora_r']}, α={CONFIG['lora_alpha']}, "
+    print(f"LoRA: float32 | r={CONFIG['lora_r']}, α={CONFIG['lora_alpha']}, "
           f"targets={CONFIG['lora_target_modules']}")
     print(f"Dataset: ENRON Email Corpus ({CONFIG['max_emails']:,} emails)")
     print(f"Attack pairs: {len(attack_pairs):,} (name, email) pairs")
