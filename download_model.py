@@ -15,11 +15,14 @@ import torch
 
 MODEL = "gpt2-large"
 
-cache_dir = os.environ.get("HF_HOME", None)
+hf_home = os.environ.get("HF_HOME")
 print(f"Downloading {MODEL} (~3 GB) ...")
-print(f"Cache dir: {cache_dir or '~/.cache/huggingface (default)'}")
+print(f"HF_HOME: {hf_home or '~/.cache/huggingface (default)'}")
 
-AutoTokenizer.from_pretrained(MODEL, cache_dir=cache_dir)
-AutoModelForCausalLM.from_pretrained(MODEL, cache_dir=cache_dir, torch_dtype=torch.float16)
+# Do NOT pass cache_dir — let HF_HOME env var control the path.
+# Passing cache_dir directly places files one level too shallow, missing
+# the hub/ subdirectory that HF_HOME expects.
+AutoTokenizer.from_pretrained(MODEL)
+AutoModelForCausalLM.from_pretrained(MODEL, torch_dtype=torch.float16)
 
 print("Download complete. You can now submit run.sbatch.")
