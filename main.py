@@ -33,9 +33,9 @@ del _os, _k
 import gc
 import os
 import re
-import sys
 import json
 import random
+from datetime import datetime
 import numpy as np
 import torch
 from torch.optim import AdamW
@@ -50,16 +50,14 @@ from peft import LoraConfig, get_peft_model, TaskType
 from opacus import PrivacyEngine
 from opacus.validators import ModuleValidator
 from tabulate import tabulate
-from tqdm import tqdm as _tqdm_base
 import email
 from email.utils import parseaddr
 import warnings
 warnings.filterwarnings("ignore")
 
-# Route tqdm progress bars to stdout so they appear in SLURM .out logs.
-def tqdm(*args, **kwargs):
-    kwargs.setdefault("file", sys.stdout)
-    return _tqdm_base(*args, **kwargs)
+
+def ts():
+    return datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
 
 # Reduces CUDA memory fragmentation — helps when Opacus allocates many
 # small per-sample gradient buffers alongside the large model weights.
@@ -180,42 +178,47 @@ class EnronDataProcessor:
             re.IGNORECASE
         )
 
-        with tqdm(desc="Scanning ENRON corpus", unit="file") as pbar:
-            for dirpath, dirnames, filenames in os.walk(root_dir):
-                for filename in filenames:
-                    filepath = os.path.join(dirpath, filename)
-                    body, name, addr = self.parse_email_file(filepath)
+        file_count = 0
+        print_every_files = 25000  # print roughly every 5% of the ~517k file corpus
+        for dirpath, dirnames, filenames in os.walk(root_dir):
+            for filename in filenames:
+                filepath = os.path.join(dirpath, filename)
+                body, name, addr = self.parse_email_file(filepath)
 
-                    # Collect email body for fine-tuning
-                    if body and len(body.strip()) > 50 and body_count < CONFIG["max_emails"]:
-                        self.email_bodies.append(body.strip())
-                        body_count += 1
+                # Collect email body for fine-tuning
+                if body and len(body.strip()) > 50 and body_count < CONFIG["max_emails"]:
+                    self.email_bodies.append(body.strip())
+                    body_count += 1
 
-                    # Collect sender (name, address) pair from From: header
-                    if name and addr and "@" in addr:
-                        if "enron.com" not in addr.lower():
-                            if len(name.split()) <= 3 and len(name.strip()) > 0:
-                                pairs_set.add((name.strip(), addr.strip().lower()))
+                # Collect sender (name, address) pair from From: header
+                if name and addr and "@" in addr:
+                    if "enron.com" not in addr.lower():
+                        if len(name.split()) <= 3 and len(name.strip()) > 0:
+                            pairs_set.add((name.strip(), addr.strip().lower()))
 
-                    # Collect pairs from mailto: patterns in body text
-                    if body:
-                        for m in mailto_re.finditer(body):
-                            found_name = m.group(1).strip().rstrip('.')
-                            found_addr = m.group(2).strip().lower()
-                            if ('enron.com' not in found_addr and
-                                    len(found_name.split()) <= 4 and
-                                    len(found_name) >= 2):
-                                pairs_set.add((found_name, found_addr))
+                # Collect pairs from mailto: patterns in body text
+                if body:
+                    for m in mailto_re.finditer(body):
+                        found_name = m.group(1).strip().rstrip('.')
+                        found_addr = m.group(2).strip().lower()
+                        if ('enron.com' not in found_addr and
+                                len(found_name.split()) <= 4 and
+                                len(found_name) >= 2):
+                            pairs_set.add((found_name, found_addr))
 
-                    pbar.update(1)
-                    pbar.set_postfix(bodies=body_count, pairs=len(pairs_set), refresh=False)
+                file_count += 1
+                if file_count % print_every_files == 0:
+                    print(f"{ts()}  Scanned {file_count:,} files — "
+                          f"bodies: {body_count}, pairs: {len(pairs_set)}", flush=True)
 
-                    # Stop once we have enough of both — no need to scan all 517k files
-                    if body_count >= CONFIG["max_emails"] and len(pairs_set) >= CONFIG["subset_pairs"]:
-                        break
-                else:
-                    continue
-                break
+                # Stop once we have enough of both — no need to scan all 517k files
+                if body_count >= CONFIG["max_emails"] and len(pairs_set) >= CONFIG["subset_pairs"]:
+                    break
+            else:
+                continue
+            break
+        print(f"{ts()}  Scan complete — {file_count:,} files, "
+              f"bodies: {body_count}, pairs: {len(pairs_set)}", flush=True)
 
         self.name_email_pairs = list(pairs_set)
 
@@ -420,10 +423,10 @@ class LoRADPTrainer:
         for epoch in range(epochs):
             total_loss = 0.0
             num_batches = 0
-            pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}", unit="batch",
-                        mininterval=30, miniters=50)
+            n_batches = len(dataloader)
+            print_every = max(1, n_batches // 20)  # 5% intervals
 
-            for batch in pbar:
+            for batch_idx, batch in enumerate(dataloader):
                 optimizer.zero_grad()
 
                 # Forward pass: compute next-token prediction loss
@@ -447,7 +450,11 @@ class LoRADPTrainer:
 
                 total_loss += outputs.loss.item()
                 num_batches += 1
-                pbar.set_postfix(loss=f"{total_loss / num_batches:.4f}")
+
+                if (batch_idx + 1) % print_every == 0 or (batch_idx + 1) == n_batches:
+                    pct = (batch_idx + 1) / n_batches * 100
+                    print(f"{ts()}  [{epoch+1}/{epochs}] batch {batch_idx+1}/{n_batches} "
+                          f"({pct:5.1f}%) — loss: {total_loss / num_batches:.4f}", flush=True)
 
             avg_loss = total_loss / max(num_batches, 1)
             print(f"  Epoch {epoch+1}/{epochs} - Avg Loss: {avg_loss:.4f}")
@@ -527,15 +534,18 @@ class PrivacyAttack:
         successful = 0    # exact matches
         valid_format = 0  # syntactically valid email addresses (any address)
         total = len(name_email_pairs)
+        print_every = max(1, total // 20)  # 5% intervals
 
-        pbar = tqdm(name_email_pairs, desc="Privacy attack", unit="pair")
-        for name, true_email in pbar:
+        for i, (name, true_email) in enumerate(name_email_pairs):
             predicted = self.generate_email(model, name)
             if predicted:
                 valid_format += 1
                 if predicted == true_email.lower():
                     successful += 1
-            pbar.set_postfix(hits=successful, rate=f"{successful / max(pbar.n, 1) * 100:.2f}%")
+            if (i + 1) % print_every == 0 or (i + 1) == total:
+                pct = (i + 1) / total * 100
+                print(f"{ts()}  Attack {pct:5.1f}% — {i+1}/{total} — "
+                      f"hits: {successful} ({successful/(i+1)*100:.2f}%)", flush=True)
 
         attack_rate = successful / total * 100
         correctness = valid_format / total * 100
@@ -594,11 +604,9 @@ def run_experiment():
 
     # --- Steps 2–4: Train and attack at each noise level ---
     noise_levels = CONFIG["noise_levels"]
-    run_pbar = tqdm(enumerate(noise_levels, 1), total=len(noise_levels),
-                    desc="Experiment runs", unit="run")
 
-    for run_idx, noise in run_pbar:
-        run_pbar.set_description(f"Run {run_idx}/{len(noise_levels)}  σ={noise}")
+    for run_idx, noise in enumerate(noise_levels, 1):
+        print(f"\n{ts()} Run {run_idx}/{len(noise_levels)} — σ={noise}")
 
         if noise in completed_noise_levels:
             print(f"\n  Skipping σ={noise} (already complete)")
