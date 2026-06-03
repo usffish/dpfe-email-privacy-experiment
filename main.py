@@ -18,6 +18,7 @@ Output: Table 11 - Comparison of Attack Success Rate of Traditional Fine-Tuning
 
 import gc
 import os
+from contextlib import nullcontext
 import re
 import json
 import random
@@ -335,11 +336,16 @@ class LoRADPTrainer:
         # BatchMemoryManager splits each logical batch (16) into physical batches of 8.
         # This halves peak memory from Opacus per-sample gradient storage while keeping
         # the privacy accounting correct at the logical batch size.
-        with BatchMemoryManager(
-            data_loader=dataloader,
-            max_physical_batch_size=max_physical_batch_size,
-            optimizer=optimizer
-        ) if noise_multiplier > 0 else dataloader as active_loader:
+        loader_ctx = (
+            BatchMemoryManager(
+                data_loader=dataloader,
+                max_physical_batch_size=max_physical_batch_size,
+                optimizer=optimizer,
+            )
+            if noise_multiplier > 0
+            else nullcontext(dataloader)
+        )
+        with loader_ctx as active_loader:
             
             for epoch in range(epochs):
                 total_loss = 0.0
