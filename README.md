@@ -59,7 +59,7 @@ This experiment runs both GPT-2 base and GPT-2 Large with identical hyperparamet
 | Batch size | 16 | 2 (GPU memory constraint on GTX 1070 Ti) |
 | Epochs | 3 | 3 |
 | Training emails | 50,000 | 50,000 |
-| Attack pairs | 3,238 | 3,238 |
+| Attack pairs | 3,238 | ~2,930 (unique non-ENRON pairs available in corpus) |
 | Noise levels (σ) | 0, 0.0001, 0.0005, 0.002, 0.005 | 0, 0.0001, 0.0005, 0.002, 0.005 |
 
 ### Models
@@ -80,7 +80,12 @@ Both models are from the same GPT-2 family (same architecture, same WebText pre-
 
 The paper used standard full fine-tuning with DP-SGD applied to all model parameters. This experiment uses **LoRA** (Hu et al., 2021) instead: small low-rank adapter matrices are injected into the attention layers, and only those ~2.95M parameters are trained. The base model weights stay frozen.
 
-With LoRA, DP-SGD noise is added only to the adapter gradients — a much smaller parameter space — which generally produces a better privacy-utility tradeoff than full fine-tuning at the same noise level. Results are therefore not directly comparable to the paper's absolute Table 11 values, but the two models in this experiment are directly comparable to each other.
+With LoRA, DP-SGD noise is added only to the adapter gradients — a much smaller parameter space. This has two consequences compared to full fine-tuning:
+
+- **Less memorization** — fewer trainable parameters means the model absorbs less of the training data, so baseline attack rates are lower than the paper's
+- **Greater noise sensitivity** — the adapter gradients carry all of the learning signal, so even small amounts of noise have a proportionally larger impact on utility than they would across millions of full fine-tuning parameters
+
+Results are therefore not directly comparable to the paper's absolute Table 11 values, but the two models in this experiment are directly comparable to each other.
 
 ---
 
@@ -165,7 +170,19 @@ All hyperparameters are set via environment variables (exported in the sbatch sc
 
 ## Results
 
-Each run produces `results.json` in its output directory. Reference values from the DPFE paper (GPT-2 base, full fine-tuning):
+Each run produces `results.json` in its output directory. Run `python compare_results.py` to see both models side by side once both jobs complete.
+
+### GPT-2 base (this experiment — LoRA, batch size 2)
+
+| Noise (σ) | Attack Success Rate | Privacy Enhancement | Correctness (%) |
+|---|---|---|---|
+| 0 (baseline) | 0.068% | 0% | 96.0 |
+| 0.0001 | 0.0% | 100% | 14.2 |
+| 0.0005 | 0.034% | 50% | 70.5 |
+| 0.002 | 0.0% | 100% | 1.9 |
+| 0.005 | in progress | — | — |
+
+### DPFE paper reference (GPT-2 base, full fine-tuning, batch size 16)
 
 | Noise (σ) | Attack Success Rate | Privacy Enhancement | Correctness (%) |
 |---|---|---|---|
@@ -175,7 +192,7 @@ Each run produces `results.json` in its output directory. Reference values from 
 | 0.002 | 0.19% | 84% | 96.51 |
 | 0.005 | 0% | 100% | 94.78 |
 
-Results from this experiment will differ due to LoRA fine-tuning (vs full fine-tuning) and batch size 2 (vs 16). Run `python compare_results.py` to see both models side by side once both jobs complete.
+**Notable differences from the paper:** Attack rates are lower at every noise level (LoRA memorizes less than full fine-tuning). Correctness degrades far more sharply — the paper maintains 94–100% correctness across all noise levels while LoRA drops to under 2% at σ=0.002. This is consistent with LoRA's greater sensitivity to gradient noise described in the fine-tuning method section above.
 
 **Attack success rate** — percentage of the 3,238 name-email pairs where the model correctly reproduced the exact email address when prompted with the owner's name.
 
@@ -213,7 +230,9 @@ mkdir -p dpfe-email-privacy-experiment/logs
 
 ### Note on first-run corpus scan
 
-On the first job submission, the script scans ENRON files until it collects enough (name, email) attack pairs. Results are cached to `enron_data/processed_data.json` and loaded instantly on all subsequent runs.
+On the first job submission, the script scans all ~517k ENRON files to collect email bodies and non-ENRON (name, email) attack pairs. This takes approximately 30 minutes on CIRCE. Results are cached to `enron_data/processed_data.json` and loaded instantly on all subsequent runs.
+
+The cache stores the config it was built with (`MAX_EMAILS`, `SUBSET_PAIRS`). If you change either value, the cache is automatically invalidated and the corpus is rescanned. The corpus yields approximately **2,930 unique non-ENRON pairs** — fewer than the paper's 3,238, likely due to stricter domain filtering.
 
 ### Step 2 — Pre-download both models (login node only — no internet on compute nodes)
 
@@ -262,7 +281,13 @@ SLURM inherits environment variables from the submission shell. If submitted via
 #### 2. `/work_bgfs` env var purge
 SLURM injects a variable pointing to `/work_bgfs/i/<netid>/`, which is inaccessible on compute nodes. **Fix:** `main.py` removes those env vars at the top before any imports.
 
-> **Simplified from previous version:** The old QLoRA/bitsandbytes approach required four complex patches (LD_LIBRARY_PATH hacks, dispatch_model monkey-patching, etc.). Switching to plain LoRA with float32 eliminates all of that — only the `/work_bgfs` purge remains.
+#### 3. Opacus PRV accountant overflow (σ ≪ 0.01)
+For very small noise values, the PRV privacy accountant tries to allocate a numpy array with ~2×10¹⁵ elements, crashing the job after training completes. **Fix:** `get_epsilon()` is wrapped in a try/except that returns `float("inf")` on failure — the training result is still saved.
+
+#### 4. Inter-sigma GPU OOM
+Opacus `GradSampleModule` holds circular references that keep the previous sigma's model (~3.1 GB for GPT-2 Large) in VRAM while the next sigma loads a fresh model. Both sit in VRAM simultaneously, leaving no room for `ModuleValidator.fix()`'s internal `clone_module()`. **Fix:** explicit `gc.collect()` after `del model`, and `ModuleValidator.fix()` is called while the model is on CPU (`model.cpu()` before, `model.to(device)` after).
+
+> **Simplified from previous version:** The old QLoRA/bitsandbytes approach required four complex patches (LD_LIBRARY_PATH hacks, dispatch_model monkey-patching, etc.). Switching to plain LoRA with float32 eliminates all of that.
 
 ---
 
