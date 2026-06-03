@@ -167,6 +167,8 @@ Each model run produces a Table 11 replica saved to `results/{model}/table_11_re
 
 **Correctness** — percentage of model outputs that are syntactically valid email addresses (format check).
 
+**ε (epsilon)** — privacy budget computed via the **RDP accountant** (Mironov, 2017). This gives valid but slightly looser bounds than the PRV accountant; the difference is negligible for the noise levels used here. The PRV accountant was not used because it hangs indefinitely on certain σ values (specifically σ=0.0005) due to slow FFT-based convolution for sharp privacy distributions.
+
 ---
 
 ## Running on Google Colab (`colab` branch)
@@ -287,3 +289,4 @@ See the `circe` branch for full CIRCE-specific documentation.
 - Abadi, M., et al. (2016). *Deep Learning with Differential Privacy.* ACM CCS 2016.
 - Hu, E.J., et al. (2021). *LoRA: Low-Rank Adaptation of Large Language Models.* arXiv:2106.09685
 - Klimt, B., & Yang, Y. (2004). *The Enron Corpus: A New Dataset for Email Classification Research.* ECML 2004.
+- Mironov, I. (2017). *Rényi Differential Privacy of the Gaussian Mechanism.* IEEE CSF 2017.
