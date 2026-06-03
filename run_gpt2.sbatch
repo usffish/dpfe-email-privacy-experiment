@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=dpfe-large
+#SBATCH --job-name=dpfe-base
 #SBATCH --output=/home/i/ismailj/dpfe-email-privacy-experiment/logs/%j.out
 #SBATCH --error=/home/i/ismailj/dpfe-email-privacy-experiment/logs/%j.err
 #SBATCH --partition=snsm_itn19
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G
-#SBATCH --time=72:00:00
+#SBATCH --time=24:00:00
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=ismailjhaveri@gmail.com
 
@@ -20,12 +20,12 @@ export TRANSFORMERS_OFFLINE=1
 export TOKENIZERS_PARALLELISM=false
 export PYTHONUNBUFFERED=1
 
-# GPT-2 Large (774M) — float32 — LoRA fine-tuning with Opacus DP-SGD.
+# GPT-2 base (117M) — float32 — LoRA fine-tuning with Opacus DP-SGD.
 # Full run: 50k emails, 3 epochs, all 3238 attack pairs, 5 noise levels.
-# Estimated ~100h total across all sigmas; checkpoint/resume handles restarts.
-# Resubmit this script if the job hits the time limit — it will skip completed sigmas.
-export MODEL_NAME=gpt2-large
-export OUTPUT_DIR=results/gpt2-large
+# Estimated ~15h total; 24h limit should be sufficient in one submission.
+# Same hyperparameters as run.sbatch (gpt2-large) for a fair comparison.
+export MODEL_NAME=gpt2
+export OUTPUT_DIR=results/gpt2-base
 export MAX_EMAILS=50000
 export EPOCHS=3
 export SUBSET_PAIRS=3238
