@@ -306,7 +306,7 @@ class LoRADPTrainer:
                 filter(lambda p: p.requires_grad, model.parameters()),
                 lr=CONFIG["learning_rate"],
             )
-            privacy_engine = PrivacyEngine()
+            privacy_engine = PrivacyEngine(accountant="rdp")
             model, optimizer, dataloader = privacy_engine.make_private(
                 module=model,
                 optimizer=optimizer,
@@ -380,7 +380,7 @@ class LoRADPTrainer:
                               f" — loss: {total_loss / num_batches:.4f}", flush=True)
 
                 avg_loss = total_loss / max(num_batches, 1)
-                print(f"  Epoch {epoch+1}/{epochs} - Avg Loss: {avg_loss:.4f}")
+                print(f"  Epoch {epoch+1}/{epochs} - Avg Loss: {avg_loss:.4f}", flush=True)
 
                 if privacy_engine is not None:
                     try:
