@@ -48,12 +48,11 @@ The DPFE framework (from the companion paper) fine-tunes foundation models using
 
 ## Models
 
-This experiment runs both **GPT-2 base (117M)** and **GPT-2 Large (774M)** with identical hyperparameters, isolating model scale as the only variable. The paper used GPT-2 base with full fine-tuning; this experiment uses LoRA for both. The table below compares the three configurations:
+This experiment runs both **GPT-2 base (117M)** and **GPT-2 Large (774M)** with identical hyperparameters, isolating model scale as the only variable. The paper used GPT-2 base with full fine-tuning; this experiment uses LoRA for both.
 
 | Property | GPT-2 (original paper) | GPT-2 base (run 1) | GPT-2 Large (run 2) |
 |---|---|---|---|
 | Developer | OpenAI | OpenAI | OpenAI |
-| Year | 2019 | 2019 | 2019 |
 | Parameters | 117M | 117M | 774M (6.6× larger) |
 | Architecture | Transformer decoder | Transformer decoder | Transformer decoder |
 | Context window | 1,024 tokens | 1,024 tokens | 1,024 tokens |
@@ -66,7 +65,7 @@ Using the same model family as the paper means results are directly comparable. 
 
 ### Fine-tuning method: LoRA
 
-Both runs use LoRA (Hu et al., 2021), which injects small low-rank adapter matrices into the attention layers. Only the ~8M adapter parameters are updated during fine-tuning — the base model weights stay frozen.
+LoRA (Hu et al., 2021) injects small low-rank adapter matrices into the attention layers. Only these adapter parameters are updated during fine-tuning — the base model weights stay frozen.
 
 This matters for the DP-SGD privacy mechanism: **noise is added only to the LoRA adapter gradients**. Fewer trainable parameters means the noise-to-signal ratio is much lower, giving a better privacy-utility tradeoff than full fine-tuning at the same noise level.
 
@@ -153,13 +152,13 @@ Each model run produces a Table 11 replica saved to `results/{model}/table_11_re
 
 **Reference values from the DPFE paper** (GPT-2 117M, full fine-tuning, ENRON):
 
-| Noise (σ) | Attack Success Rate | Privacy Enhancement | Correctness (%) |
-|---|---|---|---|
-| 0 (baseline) | 1.2% | 0% | 100 |
-| 0.0001 | 0.71% | 40% | 99.7 |
-| 0.0005 | 0.34% | 72% | 99.23 |
-| 0.002 | 0.19% | 84% | 96.51 |
-| 0.005 | 0% | 100% | 94.78 |
+| Noise (σ) | Attack Success Rate | Privacy Enhancement | Correctness (%) | ε |
+|---|---|---|---|---|
+| 0 (baseline) | 1.2% | 0% | 100 | ∞ |
+| 0.0001 | 0.71% | 40% | 99.7 | — |
+| 0.0005 | 0.34% | 72% | 99.23 | — |
+| 0.002 | 0.19% | 84% | 96.51 | — |
+| 0.005 | 0% | 100% | 94.78 | — |
 
 **Attack success rate** — percentage of the 3,238 name-email pairs where the model correctly reproduced the exact email address when prompted with the owner's name.
 
@@ -167,7 +166,7 @@ Each model run produces a Table 11 replica saved to `results/{model}/table_11_re
 
 **Correctness** — percentage of model outputs that are syntactically valid email addresses (format check).
 
-**ε (epsilon)** — privacy budget computed via the **RDP accountant** (Mironov, 2017). This gives valid but slightly looser bounds than the PRV accountant; the difference is negligible for the noise levels used here. The PRV accountant was not used because it hangs indefinitely on certain σ values (specifically σ=0.0005) due to slow FFT-based convolution for sharp privacy distributions.
+**ε (epsilon)** — privacy budget computed via the **RDP accountant** (Mironov, 2017). This gives valid but slightly looser bounds than the PRV accountant; the difference is negligible for the noise levels used here.
 
 ---
 
@@ -189,7 +188,7 @@ This branch includes `dpfe_colab.ipynb`, a self-contained notebook that handles 
    - Write your config to `.env` (edit Cell 5 to override defaults)
    - Run `main.py` and display results
 
-4. To run the second model: set `MODEL_NAME='gpt2'` in Cell 5 and re-run Cells 5–7.
+4. To run the second model: change `MODEL_NAME='gpt2'` in Cell 5 and re-run Cells 5–7.
 
 5. After both runs complete, run Cell 8 to compare results across models.
 
@@ -265,7 +264,7 @@ See the `circe` branch for full CIRCE-specific documentation.
 ```
 .
 ├── main.py               # Full experiment pipeline
-├── compare_results.py    # Side-by-side comparison across model runs
+├── compare_results.py    # Side-by-side comparison across model runs (colab branch)
 ├── dpfe_colab.ipynb      # Self-contained Colab notebook (colab branch only)
 ├── download_model.py     # Pre-download model weights (run on login node)
 ├── run.sbatch            # SLURM submission script for CIRCE
