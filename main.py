@@ -504,7 +504,7 @@ def run_experiment():
     print(f"Device: {CONFIG['device']}")
     print("=" * 60)
 
-    results_path = os.path.join(CONFIG["output_dir"], "table_11_results.json")
+    results_path = os.path.join(CONFIG["output_dir"], "results.json")
     results = []
     completed_noise_levels = set()
     baseline_rate = None

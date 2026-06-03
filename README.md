@@ -121,7 +121,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-The script trains five model variants (σ = 0, 0.0001, 0.0005, 0.002, 0.005), runs the privacy attack against each, prints the results table, and saves it to `$OUTPUT_DIR/table_11_results.json`. Completed noise levels are checkpointed — restarting the script skips already-finished runs.
+The script trains five model variants (σ = 0, 0.0001, 0.0005, 0.002, 0.005), runs the privacy attack against each, prints the results table, and saves it to `$OUTPUT_DIR/results.json`. Completed noise levels are checkpointed — restarting the script skips already-finished runs.
 
 ### Running both model experiments
 
@@ -165,7 +165,7 @@ All hyperparameters are set via environment variables (exported in the sbatch sc
 
 ## Results
 
-Each run produces `table_11_results.json` in its output directory. Reference values from the DPFE paper (GPT-2 base, full fine-tuning):
+Each run produces `results.json` in its output directory. Reference values from the DPFE paper (GPT-2 base, full fine-tuning):
 
 | Noise (σ) | Attack Success Rate | Privacy Enhancement | Correctness (%) |
 |---|---|---|---|

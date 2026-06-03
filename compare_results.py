@@ -9,8 +9,8 @@ import json
 import os
 
 EXPERIMENTS = [
-    ("GPT-2 base (117M)",  "results/gpt2-base/table_11_results.json"),
-    ("GPT-2 Large (774M)", "results/gpt2-large/table_11_results.json"),
+    ("GPT-2 base (117M)",  "results/gpt2-base/results.json"),
+    ("GPT-2 Large (774M)", "results/gpt2-large/results.json"),
 ]
 
 
