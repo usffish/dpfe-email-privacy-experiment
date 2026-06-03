@@ -179,12 +179,19 @@ class EnronDataProcessor:
     def load_or_create_synthetic_data(self):
         cache_file = os.path.join(self.data_dir, "processed_data.json")
         if os.path.exists(cache_file):
-            print("Loading cached processed data...")
             with open(cache_file, "r") as f:
                 data = json.load(f)
-            self.email_bodies = data["email_bodies"]
-            self.name_email_pairs = [(p[0], p[1]) for p in data["name_email_pairs"]]
-            return
+            cached_max = data.get("max_emails", len(data.get("email_bodies", [])))
+            cached_pairs = data.get("subset_pairs", len(data.get("name_email_pairs", [])))
+            if cached_max >= CONFIG["max_emails"] and cached_pairs >= CONFIG["subset_pairs"]:
+                print("Loading cached processed data...")
+                self.email_bodies = data["email_bodies"]
+                self.name_email_pairs = [(p[0], p[1]) for p in data["name_email_pairs"]]
+                return
+            print(
+                f"Cache mismatch (cached {cached_max} emails/{cached_pairs} pairs, "
+                f"need {CONFIG['max_emails']}/{CONFIG['subset_pairs']}) — regenerating..."
+            )
         enron_path = os.path.join(self.data_dir, "maildir")
         if os.path.exists(enron_path):
             print("Processing ENRON email corpus...")
@@ -199,6 +206,8 @@ class EnronDataProcessor:
         os.makedirs(self.data_dir, exist_ok=True)
         with open(cache_file, "w") as f:
             json.dump({
+                "max_emails": CONFIG["max_emails"],
+                "subset_pairs": CONFIG["subset_pairs"],
                 "email_bodies": self.email_bodies[:CONFIG["max_emails"]],
                 "name_email_pairs": self.name_email_pairs[:CONFIG["subset_pairs"]]
             }, f)
