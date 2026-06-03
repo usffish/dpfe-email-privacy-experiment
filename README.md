@@ -1,6 +1,6 @@
 # DPFE Email Privacy Attack Experiment
 
-Replication of the privacy attack study from **Huang et al. (2022)** — *"Are Large Pre-Trained Language Models Leaking Your Personal Information?"* — using **GPT-2 Large** and differential privacy fine-tuning (DPFE) to measure and mitigate email address leakage.
+Replication of the DPFE paper's email privacy case study using **GPT-2 Large** instead of the paper's GPT-2 base, and **LoRA** instead of full fine-tuning. The experiment measures how well DP-SGD suppresses email address extraction from a fine-tuned language model at increasing noise levels, reproducing Table 11 from the DPFE paper.
 
 ---
 
@@ -47,20 +47,38 @@ The DPFE framework (from the companion paper) fine-tunes foundation models using
 
 ## Model
 
-This experiment uses **GPT-2 Large** rather than the original GPT-2 (117M) from the paper. The table below compares them:
+This experiment departs from the paper in two deliberate ways — model scale and fine-tuning method — while keeping the dataset, attack protocol, and noise levels identical.
 
-| Property | GPT-2 (original paper) | GPT-2 Large (this experiment) |
+### Differences from the paper
+
+| Parameter | DPFE paper | This experiment |
 |---|---|---|
-| Developer | OpenAI | OpenAI |
-| Year | 2019 | 2019 |
+| Model | GPT-2 base (117M) | GPT-2 Large (774M) |
+| Fine-tuning method | **Full fine-tuning** (all 117M params) | **LoRA** (r=16, α=32, ~2.95M params) |
+| Batch size | 16 | 2 (GPU memory constraint on GTX 1070 Ti) |
+| Epochs | 3 | 3 |
+| Training emails | 50,000 | 50,000 |
+| Attack pairs | 3,238 | 3,238 |
+| Noise levels (σ) | 0, 0.0001, 0.0005, 0.002, 0.005 | 0, 0.0001, 0.0005, 0.002, 0.005 |
+
+### Model choice
+
+GPT-2 Large is the same model family as the paper (same architecture, same WebText pre-training, no ENRON exposure), scaled up 6.6×. A larger model is expected to memorize more during fine-tuning, which should raise the baseline attack rate and potentially change the shape of the privacy-utility curve across noise levels.
+
+| Property | GPT-2 (paper) | GPT-2 Large (this experiment) |
+|---|---|---|
 | Parameters | 117M | 774M (6.6× larger) |
-| Architecture | Transformer decoder | Transformer decoder (same family) |
 | Context window | 1,024 tokens | 1,024 tokens |
 | Pre-training data | WebText (~40 GB) | WebText (~40 GB) |
 | ENRON in pre-training | No | No |
-| Weights | Open | Open |
 
-Same model family as the paper, no ENRON pre-training exposure — memorization comes entirely from fine-tuning, which is what the experiment measures.
+### Fine-tuning method
+
+The paper used standard full fine-tuning with DP-SGD applied to all model parameters. This experiment uses **LoRA** (Hu et al., 2021) instead: small low-rank adapter matrices are injected into the attention layers, and only those ~2.95M parameters are trained. The 774M base model weights stay frozen.
+
+This is a meaningful methodological difference. With LoRA, DP-SGD noise is added only to the adapter gradients — a much smaller parameter space. This generally produces a better privacy-utility tradeoff than full fine-tuning at the same noise level, but makes the results not directly comparable to the paper's Table 11 values.
+
+The practical motivation for LoRA is the GPU constraint: GPT-2 Large in float32 occupies ~3.1 GB of VRAM. Full fine-tuning with Opacus per-sample gradients on all 774M parameters would require far more memory than the 8 GB GTX 1070 Ti provides.
 
 ### This experiment's model
 
@@ -70,16 +88,9 @@ Same model family as the paper, no ENRON pre-training exposure — memorization 
 | Parameters | 774M |
 | Architecture | Autoregressive transformer (GPT-2 family) |
 | Pre-training data | WebText (~40 GB) |
-| Fine-tuning method | **LoRA** — float16 base + LoRA adapters |
-| Trainable parameters | ~8M (LoRA adapters on `c_attn` Q/K/V projection) |
-
-### Why LoRA?
-
-LoRA (Hu et al., 2021) injects small low-rank adapter matrices into the attention layers. Only these ~8M parameters are updated during fine-tuning — the 774M base model weights stay frozen.
-
-This matters for the DP-SGD privacy mechanism: **noise is added only to the LoRA adapter gradients**. Fewer trainable parameters means the noise-to-signal ratio is much lower, giving a better privacy-utility tradeoff than full fine-tuning at the same noise level.
-
-GPT-2 Large fits in 8 GB VRAM in float16 (~1.5 GB), so no quantization is needed.
+| Precision | float32 (required for Opacus dtype consistency) |
+| Fine-tuning method | **LoRA** — r=16, α=32, targets `c_attn` |
+| Trainable parameters | ~2.95M (~0.38% of total) |
 
 ---
 
@@ -240,7 +251,7 @@ SLURM inherits environment variables from the submission shell. If submitted via
 #### 2. `/work_bgfs` env var purge
 SLURM injects a variable pointing to `/work_bgfs/i/<netid>/`, which is inaccessible on compute nodes. **Fix:** `main.py` removes those env vars at the top before any imports.
 
-> **Simplified from previous version:** The old QLoRA/bitsandbytes approach required four complex patches (LD_LIBRARY_PATH hacks, dispatch_model monkey-patching, etc.). Switching to plain LoRA with float16 eliminates all of that — only the `/work_bgfs` purge remains.
+> **Simplified from previous version:** The old QLoRA/bitsandbytes approach required four complex patches (LD_LIBRARY_PATH hacks, dispatch_model monkey-patching, etc.). Switching to plain LoRA with float32 eliminates all of that — only the `/work_bgfs` purge remains.
 
 ---
 
