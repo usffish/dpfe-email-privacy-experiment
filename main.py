@@ -562,6 +562,13 @@ class PrivacyAttack:
 # ============================================================
 def run_experiment():
     set_seed(CONFIG["seed"])
+
+    if os.getenv("FRESH", "0") == "1":
+        import shutil
+        if os.path.exists(CONFIG["output_dir"]):
+            shutil.rmtree(CONFIG["output_dir"])
+            print(f"{ts()} FRESH=1: wiped {CONFIG['output_dir']}", flush=True)
+
     os.makedirs(CONFIG["output_dir"], exist_ok=True)
 
     print("=" * 60)
