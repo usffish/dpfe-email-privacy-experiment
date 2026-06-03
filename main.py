@@ -16,6 +16,7 @@ Output: Table 11 - Comparison of Attack Success Rate of Traditional Fine-Tuning
          vs. Fine-Tuning with DPFE at Different Levels of Noise σ
 """
 
+import gc
 import os
 import re
 import json
@@ -314,7 +315,17 @@ class LoRADPTrainer:
             )
             print(f"  Opacus active (σ={noise_multiplier}, C={CONFIG['max_grad_norm']})")
 
-        total_steps = len(dataloader) * epochs
+        max_physical_batch_size = max(1, batch_size // 2)
+
+        # scheduler.step() is called once per physical batch inside the loop.
+        # With BatchMemoryManager each logical batch → ceil(batch_size / max_physical)
+        # physical steps, so total_steps must count physical batches to avoid the
+        # scheduler finishing early (LR → 0 halfway through DP training).
+        if noise_multiplier > 0:
+            steps_per_logical = -(-batch_size // max_physical_batch_size)  # ceiling div
+            total_steps = len(dataloader) * epochs * steps_per_logical
+        else:
+            total_steps = len(dataloader) * epochs
         scheduler = get_linear_schedule_with_warmup(
             optimizer, num_warmup_steps=0, num_training_steps=total_steps
         )
@@ -326,7 +337,7 @@ class LoRADPTrainer:
         # the privacy accounting correct at the logical batch size.
         with BatchMemoryManager(
             data_loader=dataloader,
-            max_physical_batch_size=max(1, batch_size // 2),
+            max_physical_batch_size=max_physical_batch_size,
             optimizer=optimizer
         ) if noise_multiplier > 0 else dataloader as active_loader:
             
@@ -439,7 +450,9 @@ class PrivacyAttack:
 # ============================================================
 def run_experiment():
     set_seed(CONFIG["seed"])
-    os.makedirs(CONFIG["output_dir"], exist_ok=True)
+    model_slug = CONFIG["model_name"].replace("/", "-")
+    model_dir = os.path.join(CONFIG["output_dir"], model_slug)
+    os.makedirs(model_dir, exist_ok=True)
 
     print("=" * 60)
     print("DPFE Email Privacy Attack Experiment")
@@ -449,7 +462,7 @@ def run_experiment():
     print(f"Device: {CONFIG['device']}")
     print("=" * 60)
 
-    results_path = os.path.join(CONFIG["output_dir"], "table_11_results.json")
+    results_path = os.path.join(model_dir, "table_11_results.json")
     results = []
     completed_noise_levels = set()
     baseline_rate = None
@@ -494,7 +507,7 @@ def run_experiment():
             batch_size=CONFIG["batch_size"],
         )
 
-        checkpoint_dir = os.path.join(CONFIG["output_dir"], f"checkpoints/sigma_{noise}")
+        checkpoint_dir = os.path.join(model_dir, f"checkpoints/sigma_{noise}")
         os.makedirs(checkpoint_dir, exist_ok=True)
         model.save_pretrained(checkpoint_dir)
         print(f"  Model checkpoint → {checkpoint_dir}")
@@ -531,12 +544,14 @@ def run_experiment():
             print(f"    Privacy budget:      ε = {epsilon:.4f}, δ = 1e-5")
 
         del model
+        gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
     results.sort(key=lambda r: r["noise"])
     print_results_table(results, attack_pairs)
     print(f"\nResults saved to {results_path}")
+    return results_path
 
 
 def print_results_table(results, attack_pairs):
@@ -559,7 +574,7 @@ def print_results_table(results, attack_pairs):
     ]
     print(tabulate(table_data, headers=headers, tablefmt="grid", stralign="center"))
     print()
-    print(f"Model: {CONFIG['model_name']} (774M parameters)")
+    print(f"Model: {CONFIG['model_name']}")
     print(f"LoRA: float32 | r={CONFIG['lora_r']}, α={CONFIG['lora_alpha']}, "
           f"targets={CONFIG['lora_target_modules']}")
     print(f"Dataset: ENRON Email Corpus ({CONFIG['max_emails']:,} emails)")

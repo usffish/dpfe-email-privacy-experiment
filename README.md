@@ -1,19 +1,20 @@
 # DPFE Email Privacy Attack Experiment
 
-Replication of the privacy attack study from **Huang et al. (2022)** — *"Are Large Pre-Trained Language Models Leaking Your Personal Information?"* — using **GPT-2 Large** and differential privacy fine-tuning (DPFE) to measure and mitigate email address leakage.
+Replication of the privacy attack study from **Huang et al. (2022)** — *"Are Large Pre-Trained Language Models Leaking Your Personal Information?"* — using **GPT-2 base (117M)** and **GPT-2 Large (774M)** with differential privacy fine-tuning (DPFE) to measure and mitigate email address leakage.
 
 ---
 
 ## Overview
 
-Large language models memorize personal information from their training data. This project asks: *how much of that information can an adversary actually extract?* And more importantly: *can differential privacy suppress the leakage without destroying model utility?*
+Large language models memorize personal information from their training data. This project asks: *how much of that information can an adversary actually extract?* And more importantly: *can differential privacy suppress the leakage without destroying model utility?* And does model scale change the answer?
 
 The experiment pipeline:
 
-1. **Fine-tune** GPT-2 Large on a subset of the ENRON email corpus
+1. **Fine-tune** GPT-2 (both base and Large) on a subset of the ENRON email corpus
 2. **Attack** the fine-tuned model using a prompt-based extraction strategy (Carlini et al., 2022)
 3. **Repeat** with DP-SGD at increasing noise levels (DPFE framework)
 4. **Report** attack success rate, privacy enhancement, and model correctness — replicating Table 11 from the DPFE paper
+5. **Compare** results across model scales using `compare_results.py`
 
 ---
 
@@ -45,41 +46,37 @@ The DPFE framework (from the companion paper) fine-tunes foundation models using
 
 ---
 
-## Model
+## Models
 
-This experiment uses **GPT-2 Large** rather than the original GPT-2 (117M) from the paper. The table below compares both models:
+This experiment runs both **GPT-2 base (117M)** and **GPT-2 Large (774M)** with identical hyperparameters, isolating model scale as the only variable. The paper used GPT-2 base with full fine-tuning; this experiment uses LoRA for both. The table below compares the three configurations:
 
-| Property | GPT-2 (original paper) | GPT-2 Large (this experiment) |
-|---|---|---|
-| Developer | OpenAI | OpenAI |
-| Year | 2019 | 2019 |
-| Parameters | 117M | 774M (6.6× larger) |
-| Architecture | Transformer decoder | Transformer decoder (same family) |
-| Context window | 1,024 tokens | 1,024 tokens |
-| Pre-training data | WebText (~40 GB) | WebText (~40 GB) |
-| ENRON in pre-training | No | No |
-| Weights | Open | Open |
+| Property | GPT-2 (original paper) | GPT-2 base (run 1) | GPT-2 Large (run 2) |
+|---|---|---|---|
+| Developer | OpenAI | OpenAI | OpenAI |
+| Year | 2019 | 2019 | 2019 |
+| Parameters | 117M | 117M | 774M (6.6× larger) |
+| Architecture | Transformer decoder | Transformer decoder | Transformer decoder |
+| Context window | 1,024 tokens | 1,024 tokens | 1,024 tokens |
+| Pre-training data | WebText (~40 GB) | WebText (~40 GB) | WebText (~40 GB) |
+| ENRON in pre-training | No | No | No |
+| Fine-tuning method | Full fine-tuning | **LoRA** | **LoRA** |
+| Weights | Open | Open | Open |
 
-Using the same model family as the paper means results are directly comparable. Neither model was pre-trained on ENRON data, so any email memorization comes entirely from fine-tuning — which is what the experiment is designed to measure.
+Using the same model family as the paper means results are directly comparable. Neither model was pre-trained on ENRON data, so any email memorization comes entirely from fine-tuning.
 
-### This experiment's model
+### Fine-tuning method: LoRA
 
-| Property | Value |
-|---|---|
-| Model | [gpt2-large](https://huggingface.co/gpt2-large) |
-| Parameters | 774M |
-| Architecture | Autoregressive transformer (GPT-2 family) |
-| Pre-training data | WebText (~40 GB) |
-| Fine-tuning method | **LoRA** — float16 base + LoRA adapters |
-| Trainable parameters | ~8M (LoRA adapters on `c_attn` Q/K/V projection) |
-
-### Why LoRA?
-
-LoRA (Hu et al., 2021) injects small low-rank adapter matrices into the attention layers. Only these ~8M parameters are updated during fine-tuning — the 774M base model weights stay frozen.
+Both runs use LoRA (Hu et al., 2021), which injects small low-rank adapter matrices into the attention layers. Only the ~8M adapter parameters are updated during fine-tuning — the base model weights stay frozen.
 
 This matters for the DP-SGD privacy mechanism: **noise is added only to the LoRA adapter gradients**. Fewer trainable parameters means the noise-to-signal ratio is much lower, giving a better privacy-utility tradeoff than full fine-tuning at the same noise level.
 
-GPT-2 Large fits comfortably in GPU memory in float16 (~1.5 GB), so no quantization is needed.
+| Property | GPT-2 base | GPT-2 Large |
+|---|---|---|
+| HuggingFace ID | [gpt2](https://huggingface.co/gpt2) | [gpt2-large](https://huggingface.co/gpt2-large) |
+| Total parameters | 117M | 774M |
+| Trainable (LoRA) | ~4M | ~8M |
+| LoRA targets | `c_attn` (Q/K/V) | `c_attn` (Q/K/V) |
+| Precision | float32 | float32 |
 
 ---
 
@@ -152,7 +149,9 @@ All hyperparameters can be set in `.env` (copy from the table below). The file i
 
 ## Results
 
-The experiment produces a table in the format of Table 11 from the DPFE paper:
+Each model run produces a Table 11 replica saved to `results/{model}/table_11_results.json`. After both runs, `compare_results.py` prints side-by-side tables across all metrics.
+
+**Reference values from the DPFE paper** (GPT-2 117M, full fine-tuning, ENRON):
 
 | Noise (σ) | Attack Success Rate | Privacy Enhancement | Correctness (%) |
 |---|---|---|---|
@@ -161,8 +160,6 @@ The experiment produces a table in the format of Table 11 from the DPFE paper:
 | 0.0005 | 0.34% | 72% | 99.23 |
 | 0.002 | 0.19% | 84% | 96.51 |
 | 0.005 | 0% | 100% | 94.78 |
-
-*Reference values from the DPFE paper (GPT-2, ENRON). Results with GPT-2 Large may differ.*
 
 **Attack success rate** — percentage of the 3,238 name-email pairs where the model correctly reproduced the exact email address when prompted with the owner's name.
 
@@ -190,13 +187,17 @@ This branch includes `dpfe_colab.ipynb`, a self-contained notebook that handles 
    - Write your config to `.env` (edit Cell 5 to override defaults)
    - Run `main.py` and display results
 
+4. To run the second model: set `MODEL_NAME='gpt2'` in Cell 5 and re-run Cells 5–7.
+
+5. After both runs complete, run Cell 8 to compare results across models.
+
 ### Estimated runtimes
 
-| GPU | Approx. time |
-|---|---|
-| A100 (40 GB) | ~3–4 hours |
-| V100 (16 GB) | ~6–8 hours |
-| T4 (16 GB) | ~10–14 hours |
+| GPU | Per model | Both models |
+|---|---|---|
+| A100 (40 GB) | ~3–4 hours | ~6–8 hours |
+| V100 (16 GB) | ~6–8 hours | ~12–16 hours |
+| T4 (16 GB) | ~10–14 hours | ~20–28 hours |
 
 **First run only:** the script scans ENRON files to collect the 3,238 non-ENRON (name, email) attack pairs. This takes an extra **5–10 minutes** but only happens once — results are cached to `enron_data/processed_data.json` and loaded instantly on subsequent runs.
 
@@ -262,6 +263,7 @@ See the `circe` branch for full CIRCE-specific documentation.
 ```
 .
 ├── main.py               # Full experiment pipeline
+├── compare_results.py    # Side-by-side comparison across model runs
 ├── dpfe_colab.ipynb      # Self-contained Colab notebook (colab branch only)
 ├── download_model.py     # Pre-download model weights (run on login node)
 ├── run.sbatch            # SLURM submission script for CIRCE
@@ -269,7 +271,11 @@ See the `circe` branch for full CIRCE-specific documentation.
 ├── pyproject.toml        # Project metadata
 ├── .env                  # Local config (gitignored)
 ├── enron_data/           # Email corpus (not tracked)
-└── results/              # Output tables (not tracked)
+└── results/
+    ├── gpt2/             # GPT-2 base results
+    │   └── table_11_results.json
+    └── gpt2-large/       # GPT-2 Large results
+        └── table_11_results.json
 ```
 
 ---
