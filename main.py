@@ -549,6 +549,7 @@ def run_experiment():
             print(f"\n  Skipping σ={noise} (already complete)")
             continue
 
+        set_seed(CONFIG["seed"])
         model, epsilon = trainer.train(
             train_texts,
             noise_multiplier=noise,
