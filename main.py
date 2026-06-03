@@ -25,6 +25,7 @@ for _k in list(_os.environ.keys()):
         del _os.environ[_k]
 del _os, _k
 
+import gc
 import os
 import re
 import sys
@@ -358,7 +359,12 @@ class LoRADPTrainer:
 
         privacy_engine = None
         if noise_multiplier > 0:
+            # Fix on CPU: clone_module inside fix() serializes/deserializes to CUDA,
+            # which OOMs when the GPU is already nearly full from a previous sigma run.
+            model.cpu()
+            torch.cuda.empty_cache()
             model = ModuleValidator.fix(model)
+            model.to(self.device)
             # Rebuild optimizer after ModuleValidator.fix() — it replaces modules,
             # invalidating the parameter references the original optimizer held.
             optimizer = AdamW(
@@ -580,6 +586,7 @@ def run_experiment():
             print(f"    Privacy budget:      ε = {epsilon:.4f}, δ = 1e-5")
 
         del model
+        gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
