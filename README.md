@@ -1,6 +1,6 @@
 # DPFE Email Privacy Attack Experiment
 
-Replication of the DPFE paper's email privacy case study using **GPT-2 Large** instead of the paper's GPT-2 base, and **LoRA** instead of full fine-tuning. The experiment measures how well DP-SGD suppresses email address extraction from a fine-tuned language model at increasing noise levels, reproducing Table 11 from the DPFE paper.
+Replication of the DPFE paper's email privacy case study, extended to compare **GPT-2 base (117M)** against **GPT-2 Large (774M)** using **LoRA** instead of the paper's full fine-tuning. Both models are run with identical hyperparameters so results are directly comparable to each other and to the paper's Table 11.
 
 ---
 
@@ -8,12 +8,13 @@ Replication of the DPFE paper's email privacy case study using **GPT-2 Large** i
 
 Large language models memorize personal information from their training data. This project asks: *how much of that information can an adversary actually extract?* And more importantly: *can differential privacy suppress the leakage without destroying model utility?*
 
-The experiment pipeline:
+The experiment pipeline (run once per model):
 
-1. **Fine-tune** GPT-2 Large on a subset of the ENRON email corpus
+1. **Fine-tune** the model on a subset of the ENRON email corpus
 2. **Attack** the fine-tuned model using a prompt-based extraction strategy (Carlini et al., 2022)
 3. **Repeat** with DP-SGD at increasing noise levels (DPFE framework)
 4. **Report** attack success rate, privacy enhancement, and model correctness — replicating Table 11 from the DPFE paper
+5. **Compare** results across GPT-2 base and GPT-2 Large
 
 ---
 
@@ -47,50 +48,39 @@ The DPFE framework (from the companion paper) fine-tunes foundation models using
 
 ## Model
 
-This experiment departs from the paper in two deliberate ways — model scale and fine-tuning method — while keeping the dataset, attack protocol, and noise levels identical.
+This experiment runs both GPT-2 base and GPT-2 Large with identical hyperparameters, departing from the paper only in fine-tuning method (LoRA instead of full fine-tuning) and batch size (GPU constraint).
 
 ### Differences from the paper
 
 | Parameter | DPFE paper | This experiment |
 |---|---|---|
-| Model | GPT-2 base (117M) | GPT-2 Large (774M) |
-| Fine-tuning method | **Full fine-tuning** (all 117M params) | **LoRA** (r=16, α=32, ~2.95M params) |
+| Models | GPT-2 base (117M) | GPT-2 base (117M) **and** GPT-2 Large (774M) |
+| Fine-tuning method | **Full fine-tuning** (all params) | **LoRA** (r=16, α=32, ~2.95M params) |
 | Batch size | 16 | 2 (GPU memory constraint on GTX 1070 Ti) |
 | Epochs | 3 | 3 |
 | Training emails | 50,000 | 50,000 |
 | Attack pairs | 3,238 | 3,238 |
 | Noise levels (σ) | 0, 0.0001, 0.0005, 0.002, 0.005 | 0, 0.0001, 0.0005, 0.002, 0.005 |
 
-### Model choice
+### Models
 
-GPT-2 Large is the same model family as the paper (same architecture, same WebText pre-training, no ENRON exposure), scaled up 6.6×. A larger model is expected to memorize more during fine-tuning, which should raise the baseline attack rate and potentially change the shape of the privacy-utility curve across noise levels.
+Both models are from the same GPT-2 family (same architecture, same WebText pre-training, no ENRON exposure). Running both with identical settings isolates model scale as the only variable.
 
-| Property | GPT-2 (paper) | GPT-2 Large (this experiment) |
+| Property | GPT-2 base | GPT-2 Large |
 |---|---|---|
 | Parameters | 117M | 774M (6.6× larger) |
+| VRAM (float32) | ~0.5 GB | ~3.1 GB |
 | Context window | 1,024 tokens | 1,024 tokens |
 | Pre-training data | WebText (~40 GB) | WebText (~40 GB) |
-| ENRON in pre-training | No | No |
+| Output directory | `results/gpt2-base/` | `results/gpt2-large/` |
+| SLURM script | `run_gpt2.sbatch` | `run.sbatch` |
+| Est. runtime | ~15h | ~100h (checkpoint/resume) |
 
 ### Fine-tuning method
 
-The paper used standard full fine-tuning with DP-SGD applied to all model parameters. This experiment uses **LoRA** (Hu et al., 2021) instead: small low-rank adapter matrices are injected into the attention layers, and only those ~2.95M parameters are trained. The 774M base model weights stay frozen.
+The paper used standard full fine-tuning with DP-SGD applied to all model parameters. This experiment uses **LoRA** (Hu et al., 2021) instead: small low-rank adapter matrices are injected into the attention layers, and only those ~2.95M parameters are trained. The base model weights stay frozen.
 
-This is a meaningful methodological difference. With LoRA, DP-SGD noise is added only to the adapter gradients — a much smaller parameter space. This generally produces a better privacy-utility tradeoff than full fine-tuning at the same noise level, but makes the results not directly comparable to the paper's Table 11 values.
-
-The practical motivation for LoRA is the GPU constraint: GPT-2 Large in float32 occupies ~3.1 GB of VRAM. Full fine-tuning with Opacus per-sample gradients on all 774M parameters would require far more memory than the 8 GB GTX 1070 Ti provides.
-
-### This experiment's model
-
-| Property | Value |
-|---|---|
-| Model | [gpt2-large](https://huggingface.co/gpt2-large) |
-| Parameters | 774M |
-| Architecture | Autoregressive transformer (GPT-2 family) |
-| Pre-training data | WebText (~40 GB) |
-| Precision | float32 (required for Opacus dtype consistency) |
-| Fine-tuning method | **LoRA** — r=16, α=32, targets `c_attn` |
-| Trainable parameters | ~2.95M (~0.38% of total) |
+With LoRA, DP-SGD noise is added only to the adapter gradients — a much smaller parameter space — which generally produces a better privacy-utility tradeoff than full fine-tuning at the same noise level. Results are therefore not directly comparable to the paper's absolute Table 11 values, but the two models in this experiment are directly comparable to each other.
 
 ---
 
@@ -131,39 +121,51 @@ pip install -r requirements.txt
 python main.py
 ```
 
-The script will:
+The script trains five model variants (σ = 0, 0.0001, 0.0005, 0.002, 0.005), runs the privacy attack against each, prints the results table, and saves it to `$OUTPUT_DIR/table_11_results.json`. Completed noise levels are checkpointed — restarting the script skips already-finished runs.
 
-1. Load the ENRON email dataset
-2. Train five model variants — one non-private baseline and four with increasing DP-SGD noise levels
-3. Run the privacy attack against each variant
-4. Print the results table and save it to `results/table_11_results.json`
+### Running both model experiments
+
+```bash
+# GPT-2 Large → results/gpt2-large/
+sbatch run.sbatch
+
+# GPT-2 base → results/gpt2-base/
+sbatch run_gpt2.sbatch
+```
+
+Both jobs can be submitted simultaneously and run on separate nodes. When both finish:
+
+```bash
+python compare_results.py
+```
+
+This prints a side-by-side Table 11 for both models plus a delta table showing the difference at each noise level.
 
 ### Configuration
 
-All hyperparameters can be set in `.env` (copy from the table below). The file is gitignored so values stay local.
+All hyperparameters are set via environment variables (exported in the sbatch scripts). The `.env` file can override them locally and is gitignored.
 
-| `.env` key | Default | Description |
-|---|---|---|
-| `MODEL_NAME` | `gpt2-large` | HuggingFace model ID |
-| `BATCH_SIZE` | `16` | Training batch size |
-| `EPOCHS` | `3` | Fine-tuning epochs |
-| `LEARNING_RATE` | `5e-5` | AdamW learning rate |
-| `MAX_GRAD_NORM` | `1.0` | Gradient clipping (required for DP-SGD) |
-| `MAX_EMAILS` | `50000` | Training corpus size |
-| `SUBSET_PAIRS` | `3238` | Attack evaluation pairs |
-| `MAX_LENGTH` | `256` | Token sequence length |
-| `SEED` | `42` | Random seed |
-| `LORA_R` | `16` | LoRA rank |
-| `LORA_ALPHA` | `32` | LoRA scaling factor |
-| `DATA_DIR` | `enron_data` | Path to email corpus |
-| `OUTPUT_DIR` | `results` | Path for output files |
-| `HF_HOME` | *(system default)* | HuggingFace cache dir (set to scratch on CIRCE) |
+| Variable | Default | CIRCE value | Description |
+|---|---|---|---|
+| `MODEL_NAME` | `gpt2-large` | per sbatch | HuggingFace model ID |
+| `OUTPUT_DIR` | `results` | per sbatch | Output directory for results and checkpoints |
+| `BATCH_SIZE` | `16` | `2` | Training batch size |
+| `EPOCHS` | `3` | `3` | Fine-tuning epochs |
+| `LEARNING_RATE` | `5e-5` | `5e-5` | AdamW learning rate |
+| `MAX_GRAD_NORM` | `1.0` | `1.0` | Gradient clipping (required for DP-SGD) |
+| `MAX_EMAILS` | `50000` | `50000` | Training corpus size |
+| `SUBSET_PAIRS` | `3238` | `3238` | Attack evaluation pairs |
+| `MAX_LENGTH` | `256` | `128` | Token sequence length |
+| `SEED` | `42` | `42` | Random seed |
+| `LORA_R` | `16` | `16` | LoRA rank |
+| `LORA_ALPHA` | `32` | `32` | LoRA scaling factor |
+| `DATA_DIR` | `enron_data` | `enron_data` | Path to email corpus |
 
 ---
 
 ## Results
 
-The experiment produces a table in the format of Table 11 from the DPFE paper:
+Each run produces `table_11_results.json` in its output directory. Reference values from the DPFE paper (GPT-2 base, full fine-tuning):
 
 | Noise (σ) | Attack Success Rate | Privacy Enhancement | Correctness (%) |
 |---|---|---|---|
@@ -173,7 +175,7 @@ The experiment produces a table in the format of Table 11 from the DPFE paper:
 | 0.002 | 0.19% | 84% | 96.51 |
 | 0.005 | 0% | 100% | 94.78 |
 
-*Reference values from the DPFE paper (GPT-2, ENRON). Results with GPT-2 Large may differ.*
+Results from this experiment will differ due to LoRA fine-tuning (vs full fine-tuning) and batch size 2 (vs 16). Run `python compare_results.py` to see both models side by side once both jobs complete.
 
 **Attack success rate** — percentage of the 3,238 name-email pairs where the model correctly reproduced the exact email address when prompted with the owner's name.
 
@@ -213,7 +215,7 @@ mkdir -p dpfe-email-privacy-experiment/logs
 
 On the first job submission, the script scans ENRON files until it collects enough (name, email) attack pairs. Results are cached to `enron_data/processed_data.json` and loaded instantly on all subsequent runs.
 
-### Step 2 — Pre-download the model (login node only — no internet on compute nodes)
+### Step 2 — Pre-download both models (login node only — no internet on compute nodes)
 
 ```bash
 cd ~/dpfe-email-privacy-experiment
@@ -222,23 +224,32 @@ conda activate my_environment
 python download_model.py
 ```
 
-This downloads GPT-2 Large (~3 GB) to `~/hf_cache`.
+This downloads both `gpt2` (~0.5 GB) and `gpt2-large` (~3 GB) to `~/hf_cache`.
 
-### Step 3 — Edit `run.sbatch` to set your username
+### Step 3 — Edit both sbatch scripts to set your username
 
-`run.sbatch` uses hardcoded absolute paths (required because SLURM may inherit a wrong `$HOME` from the submission environment):
+Both scripts use hardcoded absolute paths (required because SLURM may inherit a wrong `$HOME` from the submission environment):
 
 ```bash
-# Change this line in run.sbatch:
+# Change this line in run.sbatch AND run_gpt2.sbatch:
 REAL_HOME=/home/i/ismailj   # <-- replace ismailj with your CIRCE NetID
 ```
 
-### Step 4 — Submit
+### Step 4 — Submit both jobs
 
 ```bash
-sbatch run.sbatch
+sbatch run.sbatch        # GPT-2 Large → results/gpt2-large/  (~100h, checkpoint/resume)
+sbatch run_gpt2.sbatch   # GPT-2 base  → results/gpt2-base/   (~15h, single job)
 squeue -u $USER          # check queue
 tail -f logs/<jobid>.out # watch live output
+```
+
+If `run.sbatch` hits the 72h time limit before all 5 sigmas finish, resubmit it — completed sigmas are checkpointed and will be skipped.
+
+### Step 5 — Compare results
+
+```bash
+python compare_results.py
 ```
 
 ---
@@ -260,13 +271,17 @@ SLURM injects a variable pointing to `/work_bgfs/i/<netid>/`, which is inaccessi
 ```
 .
 ├── main.py               # Full experiment pipeline
-├── download_model.py     # Pre-download model weights (run on login node)
-├── run.sbatch            # SLURM submission script for CIRCE
+├── compare_results.py    # Side-by-side Table 11 comparison across models
+├── download_model.py     # Pre-download both model variants (run on login node)
+├── run.sbatch            # SLURM job: GPT-2 Large → results/gpt2-large/
+├── run_gpt2.sbatch       # SLURM job: GPT-2 base  → results/gpt2-base/
 ├── requirements.txt      # Python dependencies
 ├── pyproject.toml        # Project metadata
-├── .env                  # Local config (gitignored)
+├── .env                  # Local config overrides (gitignored)
 ├── enron_data/           # Email corpus (not tracked)
-└── results/              # Output tables (not tracked)
+└── results/
+    ├── gpt2-base/        # GPT-2 base results and checkpoints
+    └── gpt2-large/       # GPT-2 Large results and checkpoints
 ```
 
 ---
