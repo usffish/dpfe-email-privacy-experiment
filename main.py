@@ -137,6 +137,7 @@ class EnronDataProcessor:
 
     def process_directory(self, root_dir):
         body_count = 0
+        pairs_set = set()
         mailto_re = re.compile(
             r'From:\s*([A-Za-z][^<\[\n\r@]{1,60}?)\s*\[mailto:\s*'
             r'([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})\s*\]',
@@ -153,7 +154,7 @@ class EnronDataProcessor:
                     if name and addr and "@" in addr:
                         if "enron.com" not in addr.lower():
                             if len(name.split()) <= 3 and len(name.strip()) > 0:
-                                self.name_email_pairs.append((name.strip(), addr.strip().lower()))
+                                pairs_set.add((name.strip(), addr.strip().lower()))
                     if body:
                         for m in mailto_re.finditer(body):
                             found_name = m.group(1).strip().rstrip('.')
@@ -161,20 +162,17 @@ class EnronDataProcessor:
                             if ('enron.com' not in found_addr and
                                     len(found_name.split()) <= 4 and
                                     len(found_name) >= 2):
-                                self.name_email_pairs.append((found_name, found_addr))
+                                pairs_set.add((found_name, found_addr))
                     pbar.update(1)
-                    pbar.set_postfix(bodies=body_count, pairs=len(self.name_email_pairs),
+                    pbar.set_postfix(bodies=body_count, pairs=len(pairs_set),
                                      refresh=False)
-                    # Stop as soon as we have enough of both — no need to scan all 517k files.
-                    # Use *6 headroom: the early part of the corpus has ~60–70% duplicate pairs,
-                    # so we need many more raw pairs than unique ones.
                     if (body_count >= CONFIG["max_emails"] and
-                            len(self.name_email_pairs) >= CONFIG["subset_pairs"] * 6):
+                            len(pairs_set) >= CONFIG["subset_pairs"]):
                         break
                 else:
                     continue
                 break
-        self.name_email_pairs = list(set(self.name_email_pairs))
+        self.name_email_pairs = list(pairs_set)
 
     def load_or_create_synthetic_data(self):
         cache_file = os.path.join(self.data_dir, "processed_data.json")
