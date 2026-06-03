@@ -174,13 +174,13 @@ Each run produces `results.json` in its output directory. Run `python compare_re
 
 ### GPT-2 base (this experiment — LoRA, batch size 2)
 
-| Noise (σ) | Attack Success Rate | Privacy Enhancement | Correctness (%) |
-|---|---|---|---|
-| 0 (baseline) | 0.068% | 0% | 96.0 |
-| 0.0001 | 0.0% | 100% | 14.2 |
-| 0.0005 | 0.034% | 50% | 70.5 |
-| 0.002 | 0.0% | 100% | 1.9 |
-| 0.005 | in progress | — | — |
+| Noise (σ) | Attack Success Rate | Privacy Enhancement | Correctness (%) | Hits |
+|---|---|---|---|---|
+| 0 (baseline) | 0.068% | 0% | 96.0 | 2 / 2930 |
+| 0.0001 | 0.0% | 100% | 14.2 | 0 / 2930 |
+| 0.0005 | 0.034% | 50% | 70.5 | 1 / 2930 |
+| 0.002 | 0.0% | 100% | 1.9 | 0 / 2930 |
+| 0.005 | 0.0% | 100% | 0.85 | 0 / 2930 |
 
 ### DPFE paper reference (GPT-2 base, full fine-tuning, batch size 16)
 
