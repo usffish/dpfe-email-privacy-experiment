@@ -28,6 +28,7 @@ export FRESH=0          # set to 1 to wipe OUTPUT_DIR and start a clean run
 export SMOKE=0          # set to 1 for a fast end-to-end check (~15 min, separate output dir)
 export GRAD_ACCUM_STEPS=8
 export LEARNING_RATE=2e-4
+export ATTACK_BATCH_SIZE=32
 export MODEL_NAME=gpt2-large
 export OUTPUT_DIR=results/gpt2-large
 export MAX_EMAILS=50000

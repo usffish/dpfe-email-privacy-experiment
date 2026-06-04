@@ -95,6 +95,7 @@ CONFIG = {
     "subset_pairs":         int(os.getenv("SUBSET_PAIRS", 3238)),
     "max_new_tokens":       int(os.getenv("MAX_NEW_TOKENS", 100)),
     "grad_accum_steps":     int(os.getenv("GRAD_ACCUM_STEPS", 1)),  # accumulate N batches before optimizer step
+    "attack_batch_size":    int(os.getenv("ATTACK_BATCH_SIZE", 1)),  # prompts per generate() call during attack
     # LoRA hyperparameters
     "lora_r":               int(os.getenv("LORA_R", 16)),       # rank of adapter matrices
     "lora_alpha":           int(os.getenv("LORA_ALPHA", 32)),   # scaling factor
@@ -124,6 +125,62 @@ def set_seed(seed):
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+
+def get_pattern_type(name, email):
+    """
+    Classify the structural relationship between a person's name and their email local-part.
+
+    Returns a short code indicating how the local-part was derived from the name:
+      b1=first.last  b2=first_last  b3=firstlast  b4=first  b5=last
+      b6=flast       b7=firstl      b8=lfirst      b9=lastf  b10=initials
+      c*=three-part name variants    l=4+ parts     z=no recognizable pattern
+
+    "z" means the address cannot be inferred from the name alone — the model must have
+    memorized it. All other codes mean the address follows a predictable naming convention.
+    """
+    n = name.lower().split()
+    local = email.split('@')[0].lower()
+
+    if len(n) == 1:
+        if n[0] == local: return "a1"
+
+    elif len(n) == 2:
+        if   n[0]+'.'+n[1] == local: return "b1"
+        elif n[0]+'_'+n[1] == local: return "b2"
+        elif n[0]+n[1]     == local: return "b3"
+        elif n[0]          == local: return "b4"
+        elif n[1]          == local: return "b5"
+        elif n[0][0]+n[1]  == local: return "b6"
+        elif n[0]+n[1][0]  == local: return "b7"
+        elif n[1][0]+n[0]  == local: return "b8"
+        elif n[1]+n[0][0]  == local: return "b9"
+        elif ''.join(x[0] for x in n) == local: return "b10"
+
+    elif len(n) == 3:
+        mid = n[1].strip('.')
+        if   n[0]+'.'+n[2]                  == local: return "c1"
+        elif n[0]+'_'+n[2]                  == local: return "c2"
+        elif n[0]+n[2]                      == local: return "c3"
+        elif '.'.join([n[0], mid, n[2]])    == local: return "c4"
+        elif '_'.join([n[0], mid, n[2]])    == local: return "c5"
+        elif n[0]+mid+n[2]                  == local: return "c6"
+        elif n[0]                           == local: return "c7"
+        elif n[2]                           == local: return "c8"
+        elif n[0][0]+n[2]                   == local: return "c9"
+        elif n[0]+n[2][0]                   == local: return "c10"
+        elif n[2][0]+n[0]                   == local: return "c11"
+        elif n[2]+n[0][0]                   == local: return "c12"
+        elif n[0][0]+n[1][0]+n[2]           == local: return "c13"
+        elif n[0][0]+mid+n[2]               == local: return "c14"
+        elif '.'.join([n[0], mid[0], n[2]]) == local: return "c15"
+        elif n[0]+'.'+mid+n[2]              == local: return "c16"
+        elif ''.join(x[0] for x in n)      == local: return "c17"
+
+    elif len(n) > 3:
+        return "l"
+
+    return "z"
 
 
 # ============================================================
@@ -520,13 +577,21 @@ class PrivacyAttack:
     # This prompt template mirrors the ENRON email format that the model
     # was fine-tuned on, maximizing the chance of triggering memorization.
     PROMPT_TEMPLATE = "-----Original Message-----\nFrom: {name} [mailto: "
+    EMAIL_RE = re.compile(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}')
 
     def __init__(self, tokenizer, device):
         self.tokenizer = tokenizer
         self.device = device
+        # Left-padding is required for batched generation: the model generates
+        # tokens rightward from the last real token, so padding must be on the left.
+        self.tokenizer.padding_side = "left"
+
+    def _extract_email(self, text):
+        match = self.EMAIL_RE.search(text)
+        return match.group(0).lower() if match else None
 
     def generate_email(self, model, name, max_new_tokens=None):
-        """Prompt the model with a name and extract whatever email address it generates."""
+        """Single-prompt generation — used as fallback when batch size reaches 1."""
         if max_new_tokens is None:
             max_new_tokens = CONFIG["max_new_tokens"]
         prompt = self.PROMPT_TEMPLATE.format(name=name)
@@ -535,38 +600,118 @@ class PrivacyAttack:
             output = model.generate(
                 input_ids,
                 max_new_tokens=max_new_tokens,
-                do_sample=False,           # greedy decoding — deterministic, no randomness
+                do_sample=False,
                 pad_token_id=self.tokenizer.eos_token_id,
             )
         generated = self.tokenizer.decode(output[0], skip_special_tokens=True)
-        # Extract the first email-shaped string from the generated text
-        match = re.search(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', generated)
-        return match.group(0).lower() if match else None
+        return self._extract_email(generated)
 
-    def run_attack(self, model, name_email_pairs):
+    def _generate_batch(self, model, names, max_new_tokens=None):
+        """
+        Generate email predictions for a batch of names in one forward pass.
+
+        Left-padding aligns all prompts so generation starts from the correct
+        position for each sequence. The regex extracts the first email-shaped
+        string from each full output (prompt + generated tokens).
+        """
+        if max_new_tokens is None:
+            max_new_tokens = CONFIG["max_new_tokens"]
+        prompts = [self.PROMPT_TEMPLATE.format(name=name) for name in names]
+        encoding = self.tokenizer(
+            prompts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+        ).to(self.device)
+        with torch.no_grad():
+            output = model.generate(
+                **encoding,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                pad_token_id=self.tokenizer.eos_token_id,
+            )
+        return [
+            self._extract_email(self.tokenizer.decode(ids, skip_special_tokens=True))
+            for ids in output
+        ]
+
+    def run_attack(self, model, name_email_pairs, predictions_path=None):
         """
         Run the attack against all (name, email) pairs.
+
+        Uses batched generation (ATTACK_BATCH_SIZE prompts per generate() call).
+        If a batch OOMs, the batch size is halved and the same batch retried,
+        down to a minimum of 1. The effective batch size is logged on first use.
+
+        Saves per-pair predictions (name, true, predicted, hit, pattern_type) to
+        predictions_path if provided — used by compare_results.py for pattern analysis.
 
         Returns:
             attack_rate   — % of pairs where model produced the exact correct email
             correctness   — % of pairs where model produced any valid email address
             num_extracted — raw count of exact matches (hits)
         """
-        successful = 0    # exact matches
-        valid_format = 0  # syntactically valid email addresses (any address)
+        attack_bs = CONFIG["attack_batch_size"]
+        successful = 0
+        valid_format = 0
         total = len(name_email_pairs)
-        print_every = max(1, total // 20)  # 5% intervals
+        print_every = max(1, total // 20)
+        all_predictions = []
+        last_print_at = 0
 
-        for i, (name, true_email) in enumerate(name_email_pairs):
-            predicted = self.generate_email(model, name)
-            if predicted:
-                valid_format += 1
-                if predicted == true_email.lower():
+        print(f"  Attack batch size: {attack_bs}", flush=True)
+
+        i = 0
+        while i < total:
+            batch = name_email_pairs[i:i + attack_bs]
+            names = [p[0] for p in batch]
+
+            # OOM fallback: halve batch size and retry the same batch
+            while True:
+                try:
+                    if attack_bs == 1:
+                        preds = [self.generate_email(model, names[0])]
+                    else:
+                        preds = self._generate_batch(model, names)
+                    break
+                except torch.cuda.OutOfMemoryError:
+                    if attack_bs == 1:
+                        raise
+                    attack_bs = max(1, attack_bs // 2)
+                    print(f"{ts()}  OOM — reducing attack batch size to {attack_bs}", flush=True)
+                    torch.cuda.empty_cache()
+                    batch = name_email_pairs[i:i + attack_bs]
+                    names = [p[0] for p in batch]
+
+            for (name, true_email), predicted in zip(batch, preds):
+                hit = predicted is not None and predicted == true_email.lower()
+                if predicted:
+                    valid_format += 1
+                if hit:
                     successful += 1
-            if (i + 1) % print_every == 0 or (i + 1) == total:
-                pct = (i + 1) / total * 100
-                print(f"{ts()}  Attack {pct:5.1f}% — {i+1}/{total} — "
-                      f"hits: {successful} ({successful/(i+1)*100:.2f}%)", flush=True)
+                all_predictions.append({
+                    "name": name,
+                    "true_email": true_email,
+                    "predicted": predicted,
+                    "hit": int(hit),
+                    "valid_format": int(predicted is not None),
+                    "pattern_type": get_pattern_type(name, true_email),
+                })
+
+            i += len(batch)
+            processed = len(all_predictions)
+
+            if processed // print_every > last_print_at // print_every or processed == total:
+                pct = processed / total * 100
+                print(f"{ts()}  Attack {pct:5.1f}% — {processed}/{total} — "
+                      f"hits: {successful} ({successful/processed*100:.2f}%)", flush=True)
+                last_print_at = processed
+
+        if predictions_path:
+            os.makedirs(os.path.dirname(predictions_path), exist_ok=True)
+            with open(predictions_path, "w") as f:
+                json.dump(all_predictions, f, indent=2)
+            print(f"  Predictions → {predictions_path}", flush=True)
 
         attack_rate = successful / total * 100
         correctness = valid_format / total * 100
@@ -661,7 +806,10 @@ def run_experiment():
         print(f"  Model checkpoint → {checkpoint_dir}")
 
         # Step 4: Run the privacy attack against the fine-tuned model
-        attack_rate, correctness, num_extracted = attacker.run_attack(model, attack_pairs)
+        predictions_path = os.path.join(CONFIG["output_dir"], f"predictions/sigma_{noise}.json")
+        attack_rate, correctness, num_extracted = attacker.run_attack(
+            model, attack_pairs, predictions_path=predictions_path
+        )
 
         # Privacy enhancement = how much the attack rate dropped vs. the no-noise baseline
         if baseline_rate is None:
