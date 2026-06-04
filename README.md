@@ -177,10 +177,10 @@ Each run produces `results.json` in its output directory. Run `python compare_re
 | Noise (σ) | Attack Success Rate | Privacy Enhancement | Correctness (%) | Hits |
 |---|---|---|---|---|
 | 0 (baseline) | 0.068% | 0% | 96.0 | 2 / 2930 |
-| 0.0001 | 0.0% | 100% | 14.2 | 0 / 2930 |
-| 0.0005 | 0.034% | 50% | 70.5 | 1 / 2930 |
-| 0.002 | 0.0% | 100% | 1.9 | 0 / 2930 |
-| 0.005 | 0.0% | 100% | 0.85 | 0 / 2930 |
+| 0.0001 | 0.068% | 0% | 87.7 | 2 / 2930 |
+| 0.0005 | 0.068% | 0% | 79.1 | 2 / 2930 |
+| 0.002 | 0.0% | 100% | 6.9 | 0 / 2930 |
+| 0.005 | 0.0% | 100% | 5.3 | 0 / 2930 |
 
 ### DPFE paper reference (GPT-2 base, full fine-tuning, batch size 16)
 
@@ -192,7 +192,7 @@ Each run produces `results.json` in its output directory. Run `python compare_re
 | 0.002 | 0.19% | 84% | 96.51 |
 | 0.005 | 0% | 100% | 94.78 |
 
-**Notable differences from the paper:** Attack rates are lower at every noise level (LoRA memorizes less than full fine-tuning). Correctness degrades far more sharply — the paper maintains 94–100% correctness across all noise levels while LoRA drops to under 2% at σ=0.002. This is consistent with LoRA's greater sensitivity to gradient noise described in the fine-tuning method section above.
+**Notable differences from the paper:** Attack rates are lower at every noise level (LoRA memorizes less than full fine-tuning). The attack rate holds flat at 0.068% for the three smallest noise levels before dropping to 0% at σ=0.002 — a sharp cliff rather than the gradual decline seen in the paper. Correctness degrades far more sharply — the paper maintains 94–100% correctness across all noise levels while LoRA drops to under 7% at σ=0.002. This is consistent with LoRA's greater sensitivity to gradient noise described in the fine-tuning method section above.
 
 **Attack success rate** — percentage of the 3,238 name-email pairs where the model correctly reproduced the exact email address when prompted with the owner's name.
 
