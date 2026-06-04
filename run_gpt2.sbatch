@@ -24,7 +24,8 @@ export PYTHONUNBUFFERED=1
 # Full run: 50k emails, 3 epochs, all 3238 attack pairs, 5 noise levels.
 # Estimated ~15h total; 24h limit should be sufficient in one submission.
 # Same hyperparameters as run.sbatch (gpt2-large) for a fair comparison.
-export FRESH=0          # set to 1 to wipe OUTPUT_DIR and start a clean run
+export FRESH=1          # set to 1 to wipe OUTPUT_DIR and start a clean run
+export GRAD_ACCUM_STEPS=8
 export MODEL_NAME=gpt2
 export OUTPUT_DIR=results/gpt2-base
 export MAX_EMAILS=50000

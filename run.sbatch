@@ -24,7 +24,8 @@ export PYTHONUNBUFFERED=1
 # Full run: 50k emails, 3 epochs, all 3238 attack pairs, 5 noise levels.
 # Estimated ~100h total across all sigmas; checkpoint/resume handles restarts.
 # Resubmit this script if the job hits the time limit — it will skip completed sigmas.
-export FRESH=0          # set to 1 to wipe OUTPUT_DIR and start a clean run
+export FRESH=1          # set to 1 to wipe OUTPUT_DIR and start a clean run
+export GRAD_ACCUM_STEPS=8
 export MODEL_NAME=gpt2-large
 export OUTPUT_DIR=results/gpt2-large
 export MAX_EMAILS=50000

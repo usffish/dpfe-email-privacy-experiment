@@ -94,6 +94,7 @@ CONFIG = {
     "max_emails":           int(os.getenv("MAX_EMAILS", 50000)),
     "subset_pairs":         int(os.getenv("SUBSET_PAIRS", 3238)),
     "max_new_tokens":       int(os.getenv("MAX_NEW_TOKENS", 100)),
+    "grad_accum_steps":     int(os.getenv("GRAD_ACCUM_STEPS", 1)),  # accumulate N batches before optimizer step
     # LoRA hyperparameters
     "lora_r":               int(os.getenv("LORA_R", 16)),       # rank of adapter matrices
     "lora_alpha":           int(os.getenv("LORA_ALPHA", 32)),   # scaling factor
@@ -361,9 +362,13 @@ class LoRADPTrainer:
         noise_multiplier > 0   → DP-SGD: gradients are clipped to max_grad_norm
                                   and Gaussian noise of σ × max_grad_norm is added
         """
+        accum_steps = CONFIG["grad_accum_steps"]
+        effective_batch = batch_size * accum_steps
+
         print(f"\n{'='*60}")
         print(f"Training with noise σ = {noise_multiplier}")
         print(f"Mode: LoRA (float32) + {'Opacus DP-SGD' if noise_multiplier > 0 else 'standard SGD'}")
+        print(f"Batch size: {batch_size} × {accum_steps} accum steps = {effective_batch} effective")
         print(f"{'='*60}")
 
         model = self._load_model()
@@ -411,8 +416,10 @@ class LoRADPTrainer:
             )
             print(f"  Opacus active (σ={noise_multiplier}, C={CONFIG['max_grad_norm']})")
 
-        # Linear warmup + decay learning rate schedule
-        total_steps = len(dataloader) * epochs
+        # Linear warmup + decay learning rate schedule — based on optimizer steps, not batches
+        n_batches = len(dataloader)
+        optimizer_steps_per_epoch = max(1, n_batches // accum_steps)
+        total_steps = optimizer_steps_per_epoch * epochs
         scheduler = get_linear_schedule_with_warmup(
             optimizer, num_warmup_steps=0, num_training_steps=total_steps
         )
@@ -423,30 +430,30 @@ class LoRADPTrainer:
         for epoch in range(epochs):
             total_loss = 0.0
             num_batches = 0
-            n_batches = len(dataloader)
             print_every = max(1, n_batches // 20)  # 5% intervals
 
+            optimizer.zero_grad()
             for batch_idx, batch in enumerate(dataloader):
-                optimizer.zero_grad()
-
-                # Forward pass: compute next-token prediction loss
+                # Scale loss so gradients are averaged across accumulation steps
                 outputs = model(
                     input_ids=batch["input_ids"].to(self.device),
                     attention_mask=batch["attention_mask"].to(self.device),
                     labels=batch["labels"].to(self.device),
                 )
-                outputs.loss.backward()
+                (outputs.loss / accum_steps).backward()
 
-                # Opacus handles clipping + noise internally for σ > 0.
-                # For σ = 0 (baseline), clip manually to keep conditions comparable.
-                if noise_multiplier == 0:
-                    torch.nn.utils.clip_grad_norm_(
-                        filter(lambda p: p.requires_grad, model.parameters()),
-                        CONFIG["max_grad_norm"],
-                    )
-
-                optimizer.step()
-                scheduler.step()
+                is_update_step = (batch_idx + 1) % accum_steps == 0 or (batch_idx + 1) == n_batches
+                if is_update_step:
+                    # Opacus handles clipping + noise internally for σ > 0.
+                    # For σ = 0 (baseline), clip manually to keep conditions comparable.
+                    if noise_multiplier == 0:
+                        torch.nn.utils.clip_grad_norm_(
+                            filter(lambda p: p.requires_grad, model.parameters()),
+                            CONFIG["max_grad_norm"],
+                        )
+                    optimizer.step()
+                    scheduler.step()
+                    optimizer.zero_grad()
 
                 total_loss += outputs.loss.item()
                 num_batches += 1
