@@ -56,7 +56,8 @@ This experiment runs both GPT-2 base and GPT-2 Large with identical hyperparamet
 |---|---|---|
 | Models | GPT-2 base (117M) | GPT-2 base (117M) **and** GPT-2 Large (774M) |
 | Fine-tuning method | **Full fine-tuning** (all params) | **LoRA** (r=16, α=32, ~2.95M params) |
-| Batch size | 16 | 2 (GPU memory constraint on GTX 1070 Ti) |
+| Physical batch size | 16 | 2 (GPU memory constraint on GTX 1070 Ti) |
+| Effective batch size | 16 | **16** (2 × 8 gradient accumulation steps) |
 | Epochs | 3 | 3 |
 | Training emails | 50,000 | 50,000 |
 | Attack pairs | 3,238 | ~2,930 (unique non-ENRON pairs available in corpus) |
@@ -84,6 +85,12 @@ With LoRA, DP-SGD noise is added only to the adapter gradients — a much smalle
 
 - **Less memorization** — fewer trainable parameters means the model absorbs less of the training data, so baseline attack rates are lower than the paper's
 - **Greater noise sensitivity** — the adapter gradients carry all of the learning signal, so even small amounts of noise have a proportionally larger impact on utility than they would across millions of full fine-tuning parameters
+
+### Gradient accumulation
+
+The paper trained with physical batch size 16. The GTX 1070 Ti can only fit batch size 2 for GPT-2 Large in float32. To match the paper's effective batch size without exceeding VRAM, we use **gradient accumulation**: gradients are accumulated over 8 physical batches of 2 before each optimizer step. This is mathematically equivalent to batch size 16 — the optimizer sees the same averaged gradient — at no extra memory or time cost.
+
+An initial run without gradient accumulation showed GPT-2 Large achieving only 32.8% correctness at σ=0 (compared to 96% for base), indicating the model barely learned from training with only 2 examples per step. Gradient accumulation fixes this.
 
 Results are therefore not directly comparable to the paper's absolute Table 11 values, but the two models in this experiment are directly comparable to each other.
 
@@ -154,7 +161,8 @@ All hyperparameters are set via environment variables (exported in the sbatch sc
 |---|---|---|---|
 | `MODEL_NAME` | `gpt2-large` | per sbatch | HuggingFace model ID |
 | `OUTPUT_DIR` | `results` | per sbatch | Output directory for results and checkpoints |
-| `BATCH_SIZE` | `16` | `2` | Training batch size |
+| `BATCH_SIZE` | `16` | `2` | Physical batch size (limited by VRAM) |
+| `GRAD_ACCUM_STEPS` | `1` | `8` | Accumulate N batches before optimizer step (effective batch = BATCH_SIZE × N) |
 | `EPOCHS` | `3` | `3` | Fine-tuning epochs |
 | `LEARNING_RATE` | `5e-5` | `5e-5` | AdamW learning rate |
 | `MAX_GRAD_NORM` | `1.0` | `1.0` | Gradient clipping (required for DP-SGD) |
@@ -165,6 +173,8 @@ All hyperparameters are set via environment variables (exported in the sbatch sc
 | `LORA_R` | `16` | `16` | LoRA rank |
 | `LORA_ALPHA` | `32` | `32` | LoRA scaling factor |
 | `DATA_DIR` | `enron_data` | `enron_data` | Path to email corpus |
+| `FRESH` | `0` | `0` | Set to `1` to wipe OUTPUT_DIR before starting (clean rerun) |
+| `SMOKE` | `0` | `0` | Set to `1` for a fast end-to-end check (~15 min, 3k emails, 2 noise levels) |
 
 ---
 
@@ -172,7 +182,9 @@ All hyperparameters are set via environment variables (exported in the sbatch sc
 
 Each run produces `results.json` in its output directory. Run `python compare_results.py` to see both models side by side once both jobs complete.
 
-### GPT-2 base (this experiment — LoRA, batch size 2)
+### GPT-2 base — preliminary (LoRA, effective batch 16, rerun in progress)
+
+> **Note:** The current run uses gradient accumulation (effective batch 16). Results below are from an earlier run without gradient accumulation (physical batch 2 only) and will be updated when the current run completes.
 
 | Noise (σ) | Attack Success Rate | Privacy Enhancement | Correctness (%) | Hits |
 |---|---|---|---|---|
