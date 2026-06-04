@@ -102,6 +102,20 @@ CONFIG = {
     "lora_target_modules":  ["c_attn"],  # GPT-2's combined Q/K/V projection layer
 }
 
+# Smoke test mode: SMOKE=1 overrides config with small values for a fast
+# end-to-end check (~15 min). Results go to a separate output dir so they
+# never conflict with or overwrite a real run's checkpoints.
+if os.getenv("SMOKE", "0") == "1":
+    CONFIG.update({
+        "max_emails":   3000,
+        "subset_pairs": 200,
+        "epochs":       1,
+        "noise_levels": [0, 0.005],
+        "max_length":   64,
+        "output_dir":   os.path.join(CONFIG["output_dir"], "smoke"),
+    })
+    print("[SMOKE] Running smoke test — small corpus, 1 epoch, 2 noise levels", flush=True)
+
 
 def set_seed(seed):
     """Fix all random number generators to make results reproducible."""
