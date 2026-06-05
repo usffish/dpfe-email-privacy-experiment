@@ -227,9 +227,25 @@ def main():
     print(f"Attack: {HPO['attack']}")
     print(f"Model : {CONFIG['model_name']}")
 
+    # Build storage — prefer SQLite for full optuna features; fall back to
+    # JournalFileBackend if SQLAlchemy/greenlet can't be compiled on the node.
+    storage_url = HPO["storage"]
+    if storage_url.startswith("sqlite:///"):
+        try:
+            import sqlalchemy  # noqa: F401
+            storage = storage_url
+        except ImportError:
+            journal_path = storage_url.replace("sqlite:///", "").replace(".db", ".jsonl")
+            storage = optuna.storages.JournalStorage(
+                optuna.storages.JournalFileBackend(journal_path)
+            )
+            print(f"SQLAlchemy unavailable — using JournalStorage: {journal_path}")
+    else:
+        storage = storage_url
+
     study = optuna.create_study(
         study_name=HPO["study_name"],
-        storage=HPO["storage"],
+        storage=storage,
         direction="maximize",
         sampler=optuna.samplers.TPESampler(seed=42),
         pruner=optuna.pruners.HyperbandPruner(

@@ -30,8 +30,21 @@ def main():
                         help="Print best params only (machine-readable)")
     args = parser.parse_args()
 
+    storage_url = args.storage
+    if storage_url.startswith("sqlite:///"):
+        try:
+            import sqlalchemy  # noqa: F401
+            storage = storage_url
+        except ImportError:
+            journal_path = storage_url.replace("sqlite:///", "").replace(".db", ".jsonl")
+            storage = optuna.storages.JournalStorage(
+                optuna.storages.JournalFileBackend(journal_path)
+            )
+    else:
+        storage = storage_url
+
     try:
-        study = optuna.load_study(study_name=args.study, storage=args.storage)
+        study = optuna.load_study(study_name=args.study, storage=storage)
     except Exception as e:
         print(f"Could not load study '{args.study}': {e}")
         return
