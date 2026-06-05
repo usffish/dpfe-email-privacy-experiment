@@ -8,7 +8,7 @@
 #   bash submit_hpo.sh 4 attack-training-hpo-v2   # custom study name
 
 N=${1:-8}
-STUDY=${2:-"attack-training-hpo"}
+STUDY=${2:-"attack-hpo-v2"}
 
 echo "Submitting $N HPO jobs (study: $STUDY)"
 
