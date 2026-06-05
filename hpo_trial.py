@@ -76,9 +76,11 @@ def train_one_trial(trial, train_texts, tokenizer, device):
     epochs = HPO["max_epochs"]
     accum_steps = CONFIG["grad_accum_steps"]
     # Clamp batch_size to stay within 8 GB VRAM — activations scale as batch × seq_len².
-    # Clamping after sampling keeps the distribution flat; optuna learns the constraint
-    # implicitly from which configs produce results vs OOM failures.
-    max_safe = {128: 32, 256: 16, 512: 4}
+    # Empirically verified safe limits on GTX 1070 Ti (8 GB), GPT-2 base full fine-tune:
+    #   128 tokens × 32 batch — safe (attention cost 128²=small)
+    #   256 tokens × 16 batch — OOM;  256 × 8 — safe
+    #   512 tokens × 8  batch — OOM;  512 × 4 — safe
+    max_safe = {128: 32, 256: 8, 512: 4}
     batch_size = min(batch_size, max_safe[max_length])
     trial.set_user_attr("effective_batch_size", batch_size)
 
