@@ -237,7 +237,7 @@ def main():
         study_name=HPO["study_name"],
         storage=storage,
         direction="maximize",
-        sampler=optuna.samplers.TPESampler(seed=42),
+        sampler=optuna.samplers.TPESampler(),
         pruner=optuna.pruners.HyperbandPruner(
             min_resource=1,
             max_resource=HPO["max_epochs"],
