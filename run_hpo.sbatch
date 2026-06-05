@@ -38,8 +38,9 @@ export HPO_STUDY_NAME=attack-training-hpo
 export HPO_STORAGE=/home/i/ismailj/dpfe-email-privacy-experiment/hpo_study.jsonl
 export HPO_N_TRIALS=1        # one trial per job — keeps jobs short and independent
 export HPO_EMAILS=10000      # reduced corpus: ~30 min max per trial at full epochs
-export HPO_PAIRS=200         # attack pairs for evaluation
+export HPO_PAIRS=3238        # full pair set — 200 is too small (~0.17% rate = <1 expected hit)
 export HPO_ATTACK=zs_d_greedy
+export ATTACK_BATCH_SIZE=32  # batched attack inference (default is 1, too slow)
 export HPO_MAX_EPOCHS=3      # HyperBand max_resource — matches the full experiment
 
 source ${REAL_HOME}/miniconda3/etc/profile.d/conda.sh
