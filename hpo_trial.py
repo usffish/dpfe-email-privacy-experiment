@@ -227,9 +227,9 @@ def main():
     print(f"Attack: {HPO['attack']}")
     print(f"Model : {CONFIG['model_name']}")
 
-    # JournalFileBackend: append-only writes are NFS-safe (SQLite fails on NFS).
+    # JournalFileStorage: append-only writes are NFS-safe (SQLite fails on NFS).
     storage = optuna.storages.JournalStorage(
-        optuna.storages.JournalFileBackend(HPO["storage"])
+        optuna.storages.journal.JournalFileBackend(HPO["storage"])
     )
     print(f"Storage: {HPO['storage']}")
 

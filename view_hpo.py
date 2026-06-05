@@ -29,7 +29,7 @@ def main():
     args = parser.parse_args()
 
     storage = optuna.storages.JournalStorage(
-        optuna.storages.JournalFileBackend(args.storage)
+        optuna.storages.journal.JournalFileBackend(args.storage)
     )
 
     try:
