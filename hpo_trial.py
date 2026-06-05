@@ -46,7 +46,7 @@ HPO = {
     "study_name": os.getenv("HPO_STUDY_NAME", "attack-training-hpo"),
     "storage":    os.getenv(
         "HPO_STORAGE",
-        "sqlite:////home/i/ismailj/dpfe-email-privacy-experiment/hpo_study.db",
+        "/home/i/ismailj/dpfe-email-privacy-experiment/hpo_study.jsonl",
     ),
     "n_trials":   int(os.getenv("HPO_N_TRIALS", "1")),   # trials per job (keep at 1)
     "emails":     int(os.getenv("HPO_EMAILS", "10000")),  # reduced corpus for speed
@@ -227,21 +227,11 @@ def main():
     print(f"Attack: {HPO['attack']}")
     print(f"Model : {CONFIG['model_name']}")
 
-    # Build storage — prefer SQLite for full optuna features; fall back to
-    # JournalFileBackend if SQLAlchemy/greenlet can't be compiled on the node.
-    storage_url = HPO["storage"]
-    if storage_url.startswith("sqlite:///"):
-        try:
-            import sqlalchemy  # noqa: F401
-            storage = storage_url
-        except ImportError:
-            journal_path = storage_url.replace("sqlite:///", "").replace(".db", ".jsonl")
-            storage = optuna.storages.JournalStorage(
-                optuna.storages.JournalFileBackend(journal_path)
-            )
-            print(f"SQLAlchemy unavailable — using JournalStorage: {journal_path}")
-    else:
-        storage = storage_url
+    # JournalFileBackend: append-only writes are NFS-safe (SQLite fails on NFS).
+    storage = optuna.storages.JournalStorage(
+        optuna.storages.JournalFileBackend(HPO["storage"])
+    )
+    print(f"Storage: {HPO['storage']}")
 
     study = optuna.create_study(
         study_name=HPO["study_name"],

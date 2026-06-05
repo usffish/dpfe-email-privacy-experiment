@@ -35,7 +35,7 @@ export USE_LORA=1     # overridden per-trial by hpo_trial.py — set here as fal
 
 # ── HPO settings ──────────────────────────────────────────────────────────────
 export HPO_STUDY_NAME=attack-training-hpo
-export HPO_STORAGE=sqlite:////home/i/ismailj/dpfe-email-privacy-experiment/hpo_study.db
+export HPO_STORAGE=/home/i/ismailj/dpfe-email-privacy-experiment/hpo_study.jsonl
 export HPO_N_TRIALS=1        # one trial per job — keeps jobs short and independent
 export HPO_EMAILS=10000      # reduced corpus: ~30 min max per trial at full epochs
 export HPO_PAIRS=200         # attack pairs for evaluation

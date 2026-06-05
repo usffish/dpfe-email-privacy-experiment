@@ -15,9 +15,7 @@ import optuna
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
-DEFAULT_STORAGE = (
-    "sqlite:////home/i/ismailj/dpfe-email-privacy-experiment/hpo_study.db"
-)
+DEFAULT_STORAGE = "/home/i/ismailj/dpfe-email-privacy-experiment/hpo_study.jsonl"
 DEFAULT_STUDY = "attack-training-hpo"
 
 
@@ -30,18 +28,9 @@ def main():
                         help="Print best params only (machine-readable)")
     args = parser.parse_args()
 
-    storage_url = args.storage
-    if storage_url.startswith("sqlite:///"):
-        try:
-            import sqlalchemy  # noqa: F401
-            storage = storage_url
-        except ImportError:
-            journal_path = storage_url.replace("sqlite:///", "").replace(".db", ".jsonl")
-            storage = optuna.storages.JournalStorage(
-                optuna.storages.JournalFileBackend(journal_path)
-            )
-    else:
-        storage = storage_url
+    storage = optuna.storages.JournalStorage(
+        optuna.storages.JournalFileBackend(args.storage)
+    )
 
     try:
         study = optuna.load_study(study_name=args.study, storage=storage)
