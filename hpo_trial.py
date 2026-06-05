@@ -65,21 +65,25 @@ def train_one_trial(trial, train_texts, tokenizer, device):
     Returns (model, epoch_losses).
     """
     # ── Sample hyperparameters ────────────────────────────────────────────────
-    lr           = trial.suggest_float("learning_rate", 1e-5, 5e-4, log=True)
-    batch_size   = trial.suggest_categorical("batch_size", [2, 4, 8, 16, 32])
-    schedule     = trial.suggest_categorical("lr_schedule", ["linear", "cosine"])
-    weight_decay = trial.suggest_float("weight_decay", 0.0, 0.1)
-    warmup_frac  = trial.suggest_float("warmup_fraction", 0.0, 0.1)
+    lr            = trial.suggest_float("learning_rate", 1e-5, 5e-4, log=True)
+    batch_size    = trial.suggest_categorical("batch_size", [2, 4, 8, 16, 32])
+    schedule      = trial.suggest_categorical("lr_schedule", ["linear", "cosine"])
+    weight_decay  = trial.suggest_float("weight_decay", 0.0, 0.1)
+    warmup_frac   = trial.suggest_float("warmup_fraction", 0.0, 0.1)
+    max_grad_norm = trial.suggest_float("max_grad_norm", 0.5, 5.0, log=True)
+    max_length    = trial.suggest_categorical("max_length", [128, 256, 512])
     # epochs is NOT sampled — HyperBand controls budget via pruning after each epoch.
     # Full fine-tuning only: GPT-2 base (117M, ~2.1 GB base) leaves ~6 GB headroom
     # on the 1070 Ti so all batch sizes up to 32 fit safely.
+    # max_length up to 512 adds ~3.2 GB activations — still within 8 GB budget.
     epochs = HPO["max_epochs"]
     accum_steps = CONFIG["grad_accum_steps"]
 
     print(f"\n{'='*60}")
     print(f"Trial {trial.number}")
-    print(f"  lr={lr:.2e}  batch_size={batch_size}  max_epochs={epochs}")
+    print(f"  lr={lr:.2e}  batch_size={batch_size}  max_length={max_length}  max_epochs={epochs}")
     print(f"  schedule={schedule}  weight_decay={weight_decay:.4f}  warmup={warmup_frac:.2f}")
+    print(f"  max_grad_norm={max_grad_norm:.2f}")
     print(f"{'='*60}")
 
     # ── Build model (full fine-tuning) ────────────────────────────────────────
@@ -90,7 +94,7 @@ def train_one_trial(trial, train_texts, tokenizer, device):
     print(f"  Full fine-tuning: {n_params:,} parameters")
 
     model.train()
-    dataset     = EmailDataset(train_texts, tokenizer, CONFIG["max_length"])
+    dataset     = EmailDataset(train_texts, tokenizer, max_length)
     loader      = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
 
     optimizer = AdamW(
@@ -134,7 +138,7 @@ def train_one_trial(trial, train_texts, tokenizer, device):
             if is_update:
                 torch.nn.utils.clip_grad_norm_(
                     filter(lambda p: p.requires_grad, model.parameters()),
-                    CONFIG["max_grad_norm"],
+                    max_grad_norm,
                 )
                 optimizer.step()
                 scheduler.step()
@@ -200,9 +204,9 @@ def objective(trial):
     print(f"    Epoch losses        : {[f'{l:.4f}' for l in epoch_losses]}")
 
     # Attach extra info for view_hpo.py
-    trial.set_user_attr("num_hits",    num_hits)
-    trial.set_user_attr("correctness", correctness)
-    trial.set_user_attr("final_loss",  epoch_losses[-1])
+    trial.set_user_attr("num_hits",     num_hits)
+    trial.set_user_attr("correctness",  correctness)
+    trial.set_user_attr("final_loss",   epoch_losses[-1])
     trial.set_user_attr("epoch_losses", epoch_losses)
 
     del model

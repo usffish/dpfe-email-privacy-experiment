@@ -94,12 +94,18 @@ def main():
         print(f"  Epoch losses: {[f'{l:.4f}' for l in epoch_losses]}")
 
     print(f"\nTo use best params in run_attacks.sbatch:")
-    lr         = best.params.get("learning_rate")
-    batch_size = best.params.get("batch_size")
+    lr            = best.params.get("learning_rate")
+    batch_size    = best.params.get("batch_size")
+    max_grad_norm = best.params.get("max_grad_norm")
+    max_length    = best.params.get("max_length")
     if lr:
         print(f"  export LEARNING_RATE={lr:.2e}")
     if batch_size:
         print(f"  export BATCH_SIZE={batch_size}")
+    if max_grad_norm:
+        print(f"  export MAX_GRAD_NORM={max_grad_norm:.2f}")
+    if max_length:
+        print(f"  export MAX_LENGTH={max_length}")
     print(f"  export USE_LORA=0")
 
     # Importance analysis if enough trials
