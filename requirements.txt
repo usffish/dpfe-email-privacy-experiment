@@ -6,3 +6,4 @@ tabulate
 tqdm
 numpy
 python-dotenv
+optuna
