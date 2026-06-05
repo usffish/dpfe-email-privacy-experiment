@@ -94,17 +94,10 @@ def main():
         print(f"  Epoch losses: {[f'{l:.4f}' for l in epoch_losses]}")
 
     print(f"\nTo use best params in run_attacks.sbatch:")
-    lr      = best.params.get("learning_rate")
-    ft_mode = best.params.get("ft_mode")
-    lora_r  = best.params.get("lora_r")
+    lr = best.params.get("learning_rate")
     if lr:
         print(f"  export LEARNING_RATE={lr:.2e}")
-    if ft_mode == "lora" and lora_r:
-        print(f"  export USE_LORA=1")
-        print(f"  export LORA_R={lora_r}")
-        print(f"  export LORA_ALPHA={lora_r * 2}")
-    elif ft_mode == "full":
-        print(f"  export USE_LORA=0")
+    print(f"  export USE_LORA=0")
 
     # Importance analysis if enough trials
     if len(complete) >= 5:

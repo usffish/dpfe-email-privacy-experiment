@@ -27,12 +27,10 @@ from transformers import (
     get_cosine_schedule_with_warmup,
     get_linear_schedule_with_warmup,
 )
-from peft import LoraConfig, TaskType, get_peft_model
 
 # Import shared utilities from main.py without re-running run_experiment()
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from main import (
-    ATTACK_CONFIGS,
     CONFIG,
     EmailDataset,
     EnronDataProcessor,
@@ -71,41 +69,23 @@ def train_one_trial(trial, train_texts, tokenizer, device):
     schedule     = trial.suggest_categorical("lr_schedule", ["linear", "cosine"])
     weight_decay = trial.suggest_float("weight_decay", 0.0, 0.1)
     warmup_frac  = trial.suggest_float("warmup_fraction", 0.0, 0.1)
-    ft_mode      = trial.suggest_categorical("ft_mode", ["lora", "full"])
-    lora_r       = (
-        trial.suggest_categorical("lora_r", [16, 32, 64])
-        if ft_mode == "lora" else None
-    )
-    # epochs is NOT a hyperparameter — HyperBand controls early stopping via pruning.
-    # All trials train up to HPO["max_epochs"]; the pruner kills bad ones after epoch 1.
+    # Full fine-tuning only — LoRA excluded from HPO.
+    # GPT-2 base (117M, ~2.1 GB) fits comfortably on the 1070 Ti without LoRA.
     epochs = HPO["max_epochs"]
 
     print(f"\n{'='*60}")
     print(f"Trial {trial.number}")
     print(f"  lr={lr:.2e}  max_epochs={epochs}  schedule={schedule}")
     print(f"  weight_decay={weight_decay:.4f}  warmup={warmup_frac:.2f}")
-    print(f"  ft_mode={ft_mode}" + (f"  lora_r={lora_r}" if lora_r else ""))
+    print(f"  ft_mode=full")
     print(f"{'='*60}")
 
-    # ── Build model ───────────────────────────────────────────────────────────
+    # ── Build model (full fine-tuning) ────────────────────────────────────────
     model = AutoModelForCausalLM.from_pretrained(
         CONFIG["model_name"], torch_dtype=torch.float32
     ).to(device)
-
-    if ft_mode == "lora":
-        lora_cfg = LoraConfig(
-            r=lora_r,
-            lora_alpha=lora_r * 2,
-            target_modules=CONFIG["lora_target_modules"],
-            lora_dropout=0.05,
-            bias="none",
-            task_type=TaskType.CAUSAL_LM,
-        )
-        model = get_peft_model(model, lora_cfg)
-        model.print_trainable_parameters()
-    else:
-        n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        print(f"  Full fine-tuning: {n_params:,} parameters")
+    n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"  Full fine-tuning: {n_params:,} parameters")
 
     model.train()
 
