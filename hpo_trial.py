@@ -66,18 +66,20 @@ def train_one_trial(trial, train_texts, tokenizer, device):
     """
     # ── Sample hyperparameters ────────────────────────────────────────────────
     lr           = trial.suggest_float("learning_rate", 1e-5, 5e-4, log=True)
+    batch_size   = trial.suggest_categorical("batch_size", [2, 4, 8, 16, 32])
     schedule     = trial.suggest_categorical("lr_schedule", ["linear", "cosine"])
     weight_decay = trial.suggest_float("weight_decay", 0.0, 0.1)
     warmup_frac  = trial.suggest_float("warmup_fraction", 0.0, 0.1)
-    # Full fine-tuning only — LoRA excluded from HPO.
-    # GPT-2 base (117M, ~2.1 GB) fits comfortably on the 1070 Ti without LoRA.
+    # epochs is NOT sampled — HyperBand controls budget via pruning after each epoch.
+    # Full fine-tuning only: GPT-2 base (117M, ~2.1 GB base) leaves ~6 GB headroom
+    # on the 1070 Ti so all batch sizes up to 32 fit safely.
     epochs = HPO["max_epochs"]
+    accum_steps = CONFIG["grad_accum_steps"]
 
     print(f"\n{'='*60}")
     print(f"Trial {trial.number}")
-    print(f"  lr={lr:.2e}  max_epochs={epochs}  schedule={schedule}")
-    print(f"  weight_decay={weight_decay:.4f}  warmup={warmup_frac:.2f}")
-    print(f"  ft_mode=full")
+    print(f"  lr={lr:.2e}  batch_size={batch_size}  max_epochs={epochs}")
+    print(f"  schedule={schedule}  weight_decay={weight_decay:.4f}  warmup={warmup_frac:.2f}")
     print(f"{'='*60}")
 
     # ── Build model (full fine-tuning) ────────────────────────────────────────
@@ -88,9 +90,6 @@ def train_one_trial(trial, train_texts, tokenizer, device):
     print(f"  Full fine-tuning: {n_params:,} parameters")
 
     model.train()
-
-    batch_size  = CONFIG["batch_size"]
-    accum_steps = CONFIG["grad_accum_steps"]
     dataset     = EmailDataset(train_texts, tokenizer, CONFIG["max_length"])
     loader      = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
 
