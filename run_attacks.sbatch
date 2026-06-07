@@ -8,7 +8,7 @@
 #SBATCH --mem=32G
 #SBATCH --time=36:00:00
 #SBATCH --mail-type=END,FAIL
-#SBATCH --mail-user=ismailjhaveri@gmail.com
+#SBATCH --mail-user=ismailj@usf.edu
 
 # Multi-attack-type experiment — no DP noise.
 # Trains GPT-2 once, then runs all attack strategies to compare effectiveness.

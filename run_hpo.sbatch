@@ -8,7 +8,7 @@
 #SBATCH --mem=32G
 #SBATCH --time=04:00:00
 #SBATCH --mail-type=FAIL
-#SBATCH --mail-user=ismailjhaveri@gmail.com
+#SBATCH --mail-user=ismailj@usf.edu
 
 # One HPO trial per job. Submit N in parallel with: bash submit_hpo.sh N
 # All jobs share the same study via SQLite on the shared filesystem.

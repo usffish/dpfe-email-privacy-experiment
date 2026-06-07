@@ -8,7 +8,7 @@
 #SBATCH --mem=32G
 #SBATCH --time=72:00:00
 #SBATCH --mail-type=END,FAIL
-#SBATCH --mail-user=ismailjhaveri@gmail.com
+#SBATCH --mail-user=ismailj@usf.edu
 
 # Hardcoded real home — immune to SLURM inheriting HOME from submission env
 REAL_HOME=/home/i/ismailj
