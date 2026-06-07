@@ -59,7 +59,7 @@ Include explicitly with `ATTACK_TYPES=context_50,context_100,context_200`.
 | Fine-tuning | LoRA (r=64, ~11.8M params) | **Full fine-tuning** (117M params) |
 | DP noise | 5 levels (σ = 0–0.005) | **None** (σ=0 only) |
 | Attack strategies | 1 (Carlini Enron, greedy) | **15** |
-| Hyperparameter tuning | Heuristic (LR ∝ 1/r) | **BOHB sweep** (26 trials) |
+| Hyperparameter tuning | Heuristic (LR ∝ 1/r) | **BOHB sweep** (minimize val loss) |
 | Evaluation metric | Attack rate across noise levels | Attack rate across attack types |
 | Sequence length | 128 tokens | **512 tokens** (HPO finding) |
 | Results format | Table 11 replication | Ranked attack comparison |
@@ -69,6 +69,12 @@ Include explicitly with `ATTACK_TYPES=context_50,context_100,context_200`.
 ## Hyperparameter Tuning (BOHB)
 
 Training hyperparameters were selected using **BOHB** (Bayesian Optimization + HyperBand) via `optuna`, running 8 parallel trials at a time on CIRCE's `snsm_itn19` partition.
+
+### Objective: minimize validation loss
+
+The HPO objective is **validation loss on a 10% held-out split** of the training corpus — not attack success rate. This avoids biasing the hyperparameter search toward any particular extraction prompt: a config that lowers val loss generalizes better to all 15 attack types, whereas optimizing for `zs_d_greedy` specifically would prejudice the attack comparison.
+
+Attack success rate is still recorded per trial as an informational user attribute and can be inspected with `view_hpo.py`, but it does not drive the optimizer.
 
 ### Search space
 
@@ -82,7 +88,7 @@ Training hyperparameters were selected using **BOHB** (Bayesian Optimization + H
 | `warmup_fraction` | [0.0, 0.1] | uniform |
 | `max_grad_norm` | [0.5, 5.0] | log-uniform |
 
-**`epochs` is not a hyperparameter** — HyperBand controls training budget via per-epoch pruning.
+**`epochs` is not a hyperparameter** — HyperBand controls training budget via per-epoch val loss pruning.
 
 **Memory constraints** (empirically validated on 8 GB GTX 1070 Ti, full fine-tune GPT-2 base):
 
@@ -92,25 +98,17 @@ Training hyperparameters were selected using **BOHB** (Bayesian Optimization + H
 | 256 | 8 |
 | 512 | 4 |
 
-### Key findings (26 completed trials)
+### Findings from v2 sweep (26 trials, attack-rate objective)
 
-- **`max_length=512` is the dominant factor** — all top configs use it. 128-token sequences max out at 1 hit; 512-token sequences get 4–6 hits.
-- **LR sweet spot**: 1.5e-04 to 5e-04 for 512-token full fine-tuning. Below 1e-04 → underfitting; above 5e-04 → model stops generating valid email formats.
-- **Correctness–memorization tradeoff**: high LR drives loss lower but generates invalid email formats more often, reducing extractable hits.
+These informed the v3 search priors but the best config will be re-confirmed under the val loss objective:
 
-### Best config — Trial #28
+- **`max_length=512` dominates** — all top configs use it. 128-token sequences max out at 1 hit; 512-token sequences get 4–6 hits.
+- **LR sweet spot**: ~1.5e-04 to 5e-04 for 512-token full fine-tuning.
+- **Correctness–memorization tradeoff**: very high LR drives train loss lower but degrades email format correctness.
 
-```
-learning_rate   = 1.56e-04
-max_length      = 512
-batch_size      = 2   (effective 16 with GRAD_ACCUM_STEPS=8)
-lr_schedule     = linear
-weight_decay    = 0.087
-warmup_fraction = 0.046
-max_grad_norm   = 1.74
-```
+### Best config (v3 results pending)
 
-HPO results on 10k emails / 3 epochs: **5 hits / 2930 pairs (0.17%)**, correctness 67.2%, final loss 0.78.
+Run `python view_hpo.py --study attack-hpo-v3` after completing the sweep.
 
 ---
 
@@ -181,13 +179,13 @@ python compare_results.py results/gpt2-base-attacks results/gpt2-large-attacks
 bash submit_hpo.sh 8
 
 # Monitor progress from any node
-python view_hpo.py --study attack-hpo-v2
+python view_hpo.py --study attack-hpo-v3
 
 # Submit more trials later
-bash submit_hpo.sh 8 attack-hpo-v2
+bash submit_hpo.sh 8 attack-hpo-v3
 ```
 
-Each SLURM job runs one trial (train on 10k emails + attack eval). HyperBand prunes bad configs after epoch 1 (~20 min). Surviving configs run to epoch 3 (~40–60 min total).
+Each SLURM job runs one trial: trains on 9k emails (10% held out as val set), computes val loss per epoch for HyperBand pruning, then runs `zs_d_greedy` attack on 3,238 pairs as an informational check. HyperBand prunes bad configs after epoch 1 (~20 min). Surviving configs run to epoch 3 (~40–60 min total).
 
 ### Configuration
 
@@ -220,26 +218,31 @@ All hyperparameters are set via environment variables exported in the sbatch scr
 #### HPO
 | Variable | Default | Description |
 |---|---|---|
-| `HPO_STUDY_NAME` | `attack-hpo-v2` | Optuna study name |
+| `HPO_STUDY_NAME` | `attack-hpo-v3` | Optuna study name |
 | `HPO_STORAGE` | `~/dpfe-email-privacy-experiment/hpo_study.jsonl` | Shared journal file |
-| `HPO_EMAILS` | `10000` | Training corpus size for HPO (reduced for speed) |
-| `HPO_PAIRS` | `3238` | Attack pairs for HPO evaluation |
+| `HPO_EMAILS` | `10000` | Total emails per trial (90% train, 10% val) |
+| `HPO_VAL_FRAC` | `0.1` | Fraction held out for validation loss |
+| `HPO_PAIRS` | `3238` | Attack pairs recorded as user_attr (informational) |
 | `HPO_MAX_EPOCHS` | `3` | HyperBand max resource (epochs) |
 
 ---
 
 ## Results
 
-### HPO validation (10k emails, 3 epochs, 2930 pairs)
+### HPO v2 (attack-rate objective, 26 trials — superseded)
 
-| Trial | lr | max_len | loss | hits | attack% | correct% |
+Objective was `zs_d_greedy` attack success rate. Top results shown for reference; these hyperparameters biased the search toward one attack type and are superseded by v3.
+
+| Trial | lr | max_len | val_loss | hits | attack% | correct% |
 |---|---|---|---|---|---|---|
-| **#28 (recommended)** | **1.56e-04** | **512** | **0.78** | **5** | **0.17%** | **67.2%** |
+| #28 | 1.56e-04 | 512 | 0.78 | 5 | 0.17% | 67.2% |
 | #29 | 1.56e-04 | 512 | 0.79 | 5 | 0.17% | 71.9% |
 | #48 | 4.88e-04 | 512 | 0.57 | 6 | 0.20% | 54.1% |
-| #41 | 2.67e-04 | 256 | 1.11 | 4 | 0.14% | 77.3% |
 
-*Attack rates at 10k training emails are near the statistical noise floor (~5 expected hits). Full 50k results pending.*
+### HPO v3 (val-loss objective — pending)
+
+Study `attack-hpo-v3`. Objective: minimize held-out val loss (attack-type-agnostic).
+Run `python view_hpo.py --study attack-hpo-v3` to see results as trials complete.
 
 ### DPFE paper reference (GPT-2 base, full fine-tune, σ=0)
 
@@ -247,7 +250,7 @@ All hyperparameters are set via environment variables exported in the sbatch scr
 |---|---|
 | 1.2% | 100% |
 
-*Direct comparison pending full 50k run.*
+*Direct comparison pending full 50k run with v3 best config.*
 
 ---
 
