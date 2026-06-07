@@ -16,7 +16,7 @@ import optuna
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 DEFAULT_STORAGE = "/home/i/ismailj/dpfe-email-privacy-experiment/hpo_study.jsonl"
-DEFAULT_STUDY = "attack-training-hpo"
+DEFAULT_STUDY = "attack-hpo-v3"
 
 
 def main():
@@ -47,14 +47,14 @@ def main():
     if args.best:
         try:
             best = study.best_trial
-            print(f"attack_success_rate={best.value:.4f}")
+            print(f"val_loss={best.value:.4f}")
             for k, v in best.params.items():
                 print(f"{k}={v}")
         except ValueError:
             print("no_completed_trials")
         return
 
-    print(f"\nStudy: {args.study}")
+    print(f"\nStudy: {args.study}  (objective: minimize val_loss)")
     print(f"  Complete: {len(complete)}  Pruned: {len(pruned)}  "
           f"Running: {len(running)}  Failed: {len(failed)}")
 
@@ -64,38 +64,39 @@ def main():
             print(f"{len(running)} trial(s) currently running.")
         return
 
-    # Sort by attack success rate descending
-    ranked = sorted(complete, key=lambda t: t.value, reverse=True)
+    # Sort by val_loss ascending (lower = better)
+    ranked = sorted(complete, key=lambda t: t.value)
 
-    print(f"\n{'─'*80}")
-    print(f"{'Rank':<5}{'Trial':<7}{'Attack%':>8}{'Hits':>6}{'Correct%':>10}"
-          f"{'Loss':>8}  Params")
-    print(f"{'─'*80}")
+    print(f"\n{'─'*90}")
+    print(f"{'Rank':<5}{'Trial':<7}{'ValLoss':>9}{'Attack%':>9}{'Hits':>6}{'Correct%':>10}  Params")
+    print(f"{'─'*90}")
 
     for rank, t in enumerate(ranked[:args.top], 1):
-        hits    = t.user_attrs.get("num_hits", "?")
-        correct = t.user_attrs.get("correctness", None)
-        loss    = t.user_attrs.get("final_loss", None)
-        correct_str = f"{correct:.1f}%" if correct is not None else "?"
-        loss_str    = f"{loss:.4f}"     if loss    is not None else "?"
+        hits       = t.user_attrs.get("num_hits", "?")
+        correct    = t.user_attrs.get("correctness", None)
+        attack_pct = t.user_attrs.get("attack_rate", None)
+        correct_str    = f"{correct:.1f}%"    if correct    is not None else "?"
+        attack_pct_str = f"{attack_pct:.2f}%" if attack_pct is not None else "?"
         params = "  ".join(f"{k}={v}" for k, v in t.params.items())
-        print(f"{rank:<5}{t.number:<7}{t.value:>7.2f}%{hits:>6}{correct_str:>10}"
-              f"{loss_str:>8}  {params}")
+        print(f"{rank:<5}{t.number:<7}{t.value:>9.4f}{attack_pct_str:>9}{hits:>6}{correct_str:>10}  {params}")
 
-    print(f"{'─'*80}")
+    print(f"{'─'*90}")
 
     # Best trial detail
     best = study.best_trial
-    print(f"\nBest: Trial #{best.number}  Attack {best.value:.2f}%")
+    print(f"\nBest: Trial #{best.number}  val_loss={best.value:.4f}")
     print("  Hyperparameters:")
     for k, v in best.params.items():
         print(f"    {k:<22} {v}")
 
-    epoch_losses = best.user_attrs.get("epoch_losses")
-    if epoch_losses:
-        print(f"  Epoch losses: {[f'{l:.4f}' for l in epoch_losses]}")
+    val_losses = best.user_attrs.get("val_losses")
+    train_losses = best.user_attrs.get("train_losses")
+    if val_losses:
+        print(f"  Val losses  : {[f'{l:.4f}' for l in val_losses]}")
+    if train_losses:
+        print(f"  Train losses: {[f'{l:.4f}' for l in train_losses]}")
 
-    print(f"\nTo use best params in run_attacks.sbatch:")
+    print(f"\nTo use best params in run_attacks.sbatch:  (val_loss={best.value:.4f})")
     lr            = best.params.get("learning_rate")
     batch_size    = best.params.get("batch_size")
     max_grad_norm = best.params.get("max_grad_norm")
