@@ -47,7 +47,7 @@ from main import (
 # ── HPO-specific config (all overridable via env vars) ────────────────────────
 
 HPO = {
-    "study_name": os.getenv("HPO_STUDY_NAME", "attack-hpo-v3"),
+    "study_name": os.getenv("HPO_STUDY_NAME", "attack-hpo-v4"),
     "storage":    os.getenv(
         "HPO_STORAGE",
         "/home/i/ismailj/dpfe-email-privacy-experiment/hpo_study.jsonl",
@@ -57,7 +57,7 @@ HPO = {
     "val_frac":   float(os.getenv("HPO_VAL_FRAC", "0.1")), # fraction held out for val loss
     "pairs":      int(os.getenv("HPO_PAIRS", "3238")),    # attack pairs (informational only)
     "attack":     os.getenv("HPO_ATTACK", "zs_d_greedy"), # attack stored as user_attr
-    "max_epochs": int(os.getenv("HPO_MAX_EPOCHS", "3")),  # HyperBand max_resource
+    "max_epochs": int(os.getenv("HPO_MAX_EPOCHS", "5")),  # HyperBand max_resource
 }
 
 
@@ -222,7 +222,8 @@ def objective(trial):
     # ── Train ─────────────────────────────────────────────────────────────────
     model, train_losses, val_losses = train_one_trial(trial, train_texts, val_texts, tokenizer, device)
 
-    final_val_loss = val_losses[-1]
+    best_val_loss = min(val_losses)
+    best_epoch    = val_losses.index(best_val_loss) + 1  # 1-indexed
 
     # ── Attack eval (informational — not the optimization target) ──────────────
     nondomain_pool = make_nondomain_pool(attack_pairs)
@@ -238,7 +239,7 @@ def objective(trial):
     )
 
     print(f"\n  Trial {trial.number} complete:")
-    print(f"    Val loss            : {final_val_loss:.4f}  (objective)")
+    print(f"    Best val loss       : {best_val_loss:.4f}  (epoch {best_epoch})  (objective)")
     print(f"    Attack success rate : {attack_rate:.2f}% ({num_hits}/{len(attack_pairs)})  (informational)")
     print(f"    Correctness         : {correctness:.1f}%")
     print(f"    Train losses        : {[f'{l:.4f}' for l in train_losses]}")
@@ -248,7 +249,8 @@ def objective(trial):
     trial.set_user_attr("num_hits",      num_hits)
     trial.set_user_attr("correctness",   correctness)
     trial.set_user_attr("attack_rate",   attack_rate)
-    trial.set_user_attr("final_val_loss", final_val_loss)
+    trial.set_user_attr("best_val_loss", best_val_loss)
+    trial.set_user_attr("best_epoch",    best_epoch)
     trial.set_user_attr("train_losses",  train_losses)
     trial.set_user_attr("val_losses",    val_losses)
 
@@ -256,7 +258,7 @@ def objective(trial):
     gc.collect()
     torch.cuda.empty_cache()
 
-    return final_val_loss
+    return best_val_loss
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -299,7 +301,7 @@ def main():
         best = study.best_trial
         print(f"\n{'='*60}")
         print(f"Best trial so far: #{best.number}")
-        print(f"  Val loss  : {best.value:.4f}")
+        print(f"  Best val loss : {best.value:.4f}")
         print(f"  Params:")
         for k, v in best.params.items():
             print(f"    {k:<20} {v}")

@@ -16,7 +16,7 @@ import optuna
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 DEFAULT_STORAGE = "/home/i/ismailj/dpfe-email-privacy-experiment/hpo_study.jsonl"
-DEFAULT_STUDY = "attack-hpo-v3"
+DEFAULT_STUDY = "attack-hpo-v4"
 
 
 def main():
@@ -54,7 +54,7 @@ def main():
             print("no_completed_trials")
         return
 
-    print(f"\nStudy: {args.study}  (objective: minimize val_loss)")
+    print(f"\nStudy: {args.study}  (objective: min val_loss across epochs)")
     print(f"  Complete: {len(complete)}  Pruned: {len(pruned)}  "
           f"Running: {len(running)}  Failed: {len(failed)}")
 
@@ -64,32 +64,34 @@ def main():
             print(f"{len(running)} trial(s) currently running.")
         return
 
-    # Sort by val_loss ascending (lower = better)
+    # Sort by best val_loss ascending (lower = better)
     ranked = sorted(complete, key=lambda t: t.value)
 
-    print(f"\n{'─'*90}")
-    print(f"{'Rank':<5}{'Trial':<7}{'ValLoss':>9}{'Attack%':>9}{'Hits':>6}{'Correct%':>10}  Params")
-    print(f"{'─'*90}")
+    print(f"\n{'─'*95}")
+    print(f"{'Rank':<5}{'Trial':<7}{'BestVL':>8}{'Ep':>4}{'Attack%':>9}{'Hits':>6}{'Correct%':>10}  Params")
+    print(f"{'─'*95}")
 
     for rank, t in enumerate(ranked[:args.top], 1):
         hits       = t.user_attrs.get("num_hits", "?")
         correct    = t.user_attrs.get("correctness", None)
         attack_pct = t.user_attrs.get("attack_rate", None)
+        best_epoch = t.user_attrs.get("best_epoch", "?")
         correct_str    = f"{correct:.1f}%"    if correct    is not None else "?"
         attack_pct_str = f"{attack_pct:.2f}%" if attack_pct is not None else "?"
         params = "  ".join(f"{k}={v}" for k, v in t.params.items())
-        print(f"{rank:<5}{t.number:<7}{t.value:>9.4f}{attack_pct_str:>9}{hits:>6}{correct_str:>10}  {params}")
+        print(f"{rank:<5}{t.number:<7}{t.value:>8.4f}{best_epoch:>4}{attack_pct_str:>9}{hits:>6}{correct_str:>10}  {params}")
 
     print(f"{'─'*90}")
 
     # Best trial detail
     best = study.best_trial
-    print(f"\nBest: Trial #{best.number}  val_loss={best.value:.4f}")
+    best_epoch = best.user_attrs.get("best_epoch", "?")
+    print(f"\nBest: Trial #{best.number}  val_loss={best.value:.4f}  (epoch {best_epoch})")
     print("  Hyperparameters:")
     for k, v in best.params.items():
         print(f"    {k:<22} {v}")
 
-    val_losses = best.user_attrs.get("val_losses")
+    val_losses   = best.user_attrs.get("val_losses")
     train_losses = best.user_attrs.get("train_losses")
     if val_losses:
         print(f"  Val losses  : {[f'{l:.4f}' for l in val_losses]}")
