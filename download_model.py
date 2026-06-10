@@ -16,6 +16,7 @@ import torch
 MODELS = [
     ("gpt2", "~0.5 GB"),
     ("gpt2-large", "~3 GB"),
+    ("EleutherAI/gpt-neo-125M", "~0.5 GB"),
 ]
 
 hf_home = os.environ.get("HF_HOME")

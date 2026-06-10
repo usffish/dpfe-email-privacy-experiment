@@ -2,10 +2,10 @@
 #SBATCH --job-name=dpfe-base
 #SBATCH --output=/home/i/ismailj/dpfe-email-privacy-experiment/logs/%j.out
 #SBATCH --error=/home/i/ismailj/dpfe-email-privacy-experiment/logs/%j.err
-#SBATCH --partition=snsm_itn19
+#SBATCH --partition=muma_2021
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=32G
+#SBATCH --mem=64G
 #SBATCH --time=24:00:00
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=ismailj@usf.edu
