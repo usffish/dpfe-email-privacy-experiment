@@ -66,30 +66,42 @@ HPO = {
     "max_length_choices": [
         int(x) for x in os.getenv("HPO_MAX_LENGTH_CHOICES", "128,256,512").split(",")
     ],
-    "lr_min": float(os.getenv("HPO_LR_MIN", "5e-6")),
-    "lr_max": float(os.getenv("HPO_LR_MAX", "5e-4")),
+    "batch_size_choices": [
+        int(x) for x in os.getenv("HPO_BATCH_SIZE_CHOICES", "2,4,8,16,32").split(",")
+    ],
+    "lr_min":     float(os.getenv("HPO_LR_MIN", "5e-6")),
+    "lr_max":     float(os.getenv("HPO_LR_MAX", "5e-4")),
+    "wd_max":     float(os.getenv("HPO_WD_MAX", "0.1")),
+    "warmup_max": float(os.getenv("HPO_WARMUP_MAX", "0.1")),
 }
 
 
 # ── Validation loss ───────────────────────────────────────────────────────────
 
 def compute_val_loss(model, val_texts, tokenizer, max_length, batch_size, device):
+    # Token-weighted mean: HF's causal-LM loss is the mean over each batch's
+    # non-ignored (shifted) targets, so averaging batch means would weight
+    # tokens in sparsely-filled batches more — and the bias would vary with
+    # the trial's batch_size. Recover per-batch sums and divide by the total
+    # target count instead.
     val_dataset = EmailDataset(val_texts, tokenizer, max_length)
     val_loader  = DataLoader(val_dataset, batch_size=max(1, batch_size), shuffle=False)
     model.eval()
-    total_loss = 0.0
-    n_seen = 0
+    total_loss   = 0.0
+    total_tokens = 0
     with torch.no_grad():
         for batch in val_loader:
+            labels = batch["labels"].to(device)
             outputs = model(
                 input_ids=batch["input_ids"].to(device),
                 attention_mask=batch["attention_mask"].to(device),
-                labels=batch["labels"].to(device),
+                labels=labels,
             )
-            total_loss += outputs.loss.item()
-            n_seen += 1
+            n_targets = (labels[..., 1:] != -100).sum().item()
+            total_loss   += outputs.loss.item() * n_targets
+            total_tokens += n_targets
     model.train()
-    return total_loss / max(n_seen, 1)
+    return total_loss / max(total_tokens, 1)
 
 
 # ── Training loop with per-epoch optuna reporting ────────────────────────────
@@ -102,11 +114,11 @@ def train_one_trial(trial, train_texts, val_texts, tokenizer, device):
     """
     # ── Sample hyperparameters ────────────────────────────────────────────────
     lr            = trial.suggest_float("learning_rate", HPO["lr_min"], HPO["lr_max"], log=True)
-    batch_size    = trial.suggest_categorical("batch_size", [2, 4, 8, 16, 32])
+    batch_size    = trial.suggest_categorical("batch_size", HPO["batch_size_choices"])
     max_length    = trial.suggest_categorical("max_length", HPO["max_length_choices"])
     schedule      = trial.suggest_categorical("lr_schedule", ["linear", "cosine"])
-    weight_decay  = trial.suggest_float("weight_decay", 0.0, 0.1)
-    warmup_frac   = trial.suggest_float("warmup_fraction", 0.0, 0.1)
+    weight_decay  = trial.suggest_float("weight_decay", 0.0, HPO["wd_max"])
+    warmup_frac   = trial.suggest_float("warmup_fraction", 0.0, HPO["warmup_max"])
     max_grad_norm = trial.suggest_float("max_grad_norm", 0.1, 5.0, log=True)
     # epochs is NOT sampled — HyperBand controls budget via pruning after each epoch.
     epochs = HPO["max_epochs"]

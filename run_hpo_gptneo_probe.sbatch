@@ -56,9 +56,14 @@ export HPO_MAX_EPOCHS=${HPO_MAX_EPOCHS:-5}
 # ── Probe search-space overrides ──────────────────────────────────────────────
 # Longer contexts only; lr capped at 1e-4 (everything above ~6e-5 was pruned
 # in gpt-neo-hpo-v2 — no point re-exploring the divergent high-lr region).
+# batch_size 2/4 dropped (uniformly weak in v2). wd/warmup ceilings raised:
+# the v2 winner sat at 0.096/0.096, within 5% of the old 0.1 caps.
 export HPO_MAX_LENGTH_CHOICES=${HPO_MAX_LENGTH_CHOICES:-768,1024}
+export HPO_BATCH_SIZE_CHOICES=${HPO_BATCH_SIZE_CHOICES:-8,16,32}
 export HPO_LR_MIN=${HPO_LR_MIN:-5e-6}
 export HPO_LR_MAX=${HPO_LR_MAX:-1e-4}
+export HPO_WD_MAX=${HPO_WD_MAX:-0.3}
+export HPO_WARMUP_MAX=${HPO_WARMUP_MAX:-0.2}
 
 source ${REAL_HOME}/miniconda3/etc/profile.d/conda.sh
 conda activate my_environment
@@ -69,6 +74,7 @@ echo "GPU:     $(nvidia-smi --query-gpu=name --format=csv,noheader)"
 echo "Study:   ${HPO_STUDY_NAME}"
 echo "Storage: ${HPO_STORAGE}"
 echo "Lengths: ${HPO_MAX_LENGTH_CHOICES}  LR range: ${HPO_LR_MIN}-${HPO_LR_MAX}"
+echo "Batch sizes: ${HPO_BATCH_SIZE_CHOICES}  wd_max: ${HPO_WD_MAX}  warmup_max: ${HPO_WARMUP_MAX}"
 echo "Start:   $(date)"
 
 mkdir -p "${WORKDIR}/logs"

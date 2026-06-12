@@ -317,13 +317,25 @@ for live results.
 
 Follow-up to v2: under the corrected objective `max_length=512` leads, and ~22% of emails are
 still truncated at 512 tokens (~10% at 1024; median 198, mean 621 tokens, GPT-Neo tokenizer).
-This probe searches `max_length ∈ {768, 1024}` with lr capped at 1e-4 (the divergent high-lr
-region needs no re-exploration). It is a separate study because Optuna can't extend a
-categorical's choices mid-study. Search-space overrides go through new env vars
-(`HPO_MAX_LENGTH_CHOICES`, `HPO_LR_MIN`, `HPO_LR_MAX`) in `hpo_trial.py`, which also gained
-conservative VRAM batch caps for 768 (bs≤16) and 1024 (bs≤8). Launch after v2 converges:
+This probe searches `max_length ∈ {768, 1024}` with a search space tightened from v2 evidence:
+lr capped at 1e-4 (everything above ~6e-5 was pruned in v2), batch_size 2/4 dropped (uniformly
+weak in v2), and weight_decay/warmup ceilings raised to 0.3/0.2 (the v2 winner sat at
+0.096/0.096, within 5% of the old 0.1 caps — boundary-hugging suggests the optimum may lie
+outside). It is a separate study because Optuna can't change distributions mid-study.
+Overrides go through env vars in `hpo_trial.py` (`HPO_MAX_LENGTH_CHOICES`,
+`HPO_BATCH_SIZE_CHOICES`, `HPO_LR_MIN`/`HPO_LR_MAX`, `HPO_WD_MAX`, `HPO_WARMUP_MAX`), which
+also gained conservative VRAM batch caps for 768 (bs≤16) and 1024 (bs≤8), and a
+token-weighted `compute_val_loss` (was batch-averaged, which over-weighted tokens in
+sparsely-filled batches by an amount that varied with batch_size).
+
+**Launch only after `gpt-neo-hpo-v2` has fully converged**, because the token-weighted
+val-loss fix slightly changes computed values — syncing it to circe mid-study would make
+v2's objective inconsistent across batches:
 
 ```bash
+# from local machine: sync the updated trial code first
+scp hpo_trial.py circe:~/dpfe-email-privacy-experiment/
+# then on circe:
 python enqueue_len_probe.py   # optional: seed 4 trials from the v2 winner's regime
 bash submit_hpo.sh 8 gpt-neo-len-probe run_hpo_gptneo_probe.sbatch
 ```
