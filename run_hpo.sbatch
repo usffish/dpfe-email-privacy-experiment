@@ -37,7 +37,7 @@ export USE_LORA=1     # overridden per-trial by hpo_trial.py — set here as fal
 # ── HPO settings ──────────────────────────────────────────────────────────────
 # Use ':=' so a HPO_STUDY_NAME (etc.) passed in via `sbatch --export=ALL,VAR=...`
 # is preserved instead of being clobbered by this script's default.
-export HPO_STUDY_NAME=${HPO_STUDY_NAME:-attack-hpo-v4}
+export HPO_STUDY_NAME=${HPO_STUDY_NAME:-attack-hpo-v5}
 export HPO_STORAGE=${HPO_STORAGE:-/home/i/ismailj/dpfe-email-privacy-experiment/hpo_study.jsonl}
 export HPO_N_TRIALS=${HPO_N_TRIALS:-1}        # one trial per job — keeps jobs short and independent
 export HPO_EMAILS=${HPO_EMAILS:-10000}      # reduced corpus: ~30 min max per trial at full epochs
@@ -45,6 +45,12 @@ export HPO_PAIRS=${HPO_PAIRS:-3238}         # full pair set — 200 is too small
 export HPO_ATTACK=${HPO_ATTACK:-zs_d_greedy}
 export ATTACK_BATCH_SIZE=${ATTACK_BATCH_SIZE:-32}  # batched attack inference (default is 1, too slow)
 export HPO_MAX_EPOCHS=${HPO_MAX_EPOCHS:-5}      # HyperBand max_resource
+# Widened wd/warmup ceilings for v5+: both the attack-hpo-v4 and the
+# gpt-neo-hpo-v2 winners hugged the old 0.1 warmup cap. These must be
+# identical for every job of a given study (Optuna forbids changing a
+# distribution mid-study), so don't override per-batch.
+export HPO_WD_MAX=${HPO_WD_MAX:-0.3}
+export HPO_WARMUP_MAX=${HPO_WARMUP_MAX:-0.2}
 
 source ${REAL_HOME}/miniconda3/etc/profile.d/conda.sh
 conda activate my_environment
