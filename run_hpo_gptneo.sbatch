@@ -35,14 +35,16 @@ export SEED=42
 export USE_LORA=0
 
 # ── HPO settings ──────────────────────────────────────────────────────────────
-export HPO_STUDY_NAME=gpt-neo-hpo-v1
-export HPO_STORAGE=/home/i/ismailj/dpfe-email-privacy-experiment/hpo_study.jsonl
-export HPO_N_TRIALS=1
-export HPO_EMAILS=10000
-export HPO_PAIRS=3238
-export HPO_ATTACK=zs_d_greedy
-export ATTACK_BATCH_SIZE=32
-export HPO_MAX_EPOCHS=5
+# Use ':=' so a HPO_STUDY_NAME (etc.) passed in via `sbatch --export=ALL,VAR=...`
+# is preserved instead of being clobbered by this script's default.
+export HPO_STUDY_NAME=${HPO_STUDY_NAME:-gpt-neo-hpo-v1}
+export HPO_STORAGE=${HPO_STORAGE:-/home/i/ismailj/dpfe-email-privacy-experiment/hpo_study.jsonl}
+export HPO_N_TRIALS=${HPO_N_TRIALS:-1}
+export HPO_EMAILS=${HPO_EMAILS:-10000}
+export HPO_PAIRS=${HPO_PAIRS:-3238}
+export HPO_ATTACK=${HPO_ATTACK:-zs_d_greedy}
+export ATTACK_BATCH_SIZE=${ATTACK_BATCH_SIZE:-32}
+export HPO_MAX_EPOCHS=${HPO_MAX_EPOCHS:-5}
 
 source ${REAL_HOME}/miniconda3/etc/profile.d/conda.sh
 conda activate my_environment
