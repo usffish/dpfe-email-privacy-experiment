@@ -361,7 +361,13 @@ class EmailDataset(Dataset):
             return_tensors="pt",
         )
         item = {key: val.squeeze(0) for key, val in encoding.items()}
-        item["labels"] = item["input_ids"].clone()
+        labels = item["input_ids"].clone()
+        # Don't train on padding positions — without this, the loss
+        # includes "predict eos" for every pad slot, which dominates
+        # short emails padded to max_length and destabilizes training
+        # (especially at max_length=512, where most tokens are padding).
+        labels[item["attention_mask"] == 0] = -100
+        item["labels"] = labels
         return item
 
 

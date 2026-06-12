@@ -152,6 +152,8 @@ export MODEL_NAME=EleutherAI/gpt-neo-125M
 
 Run `python view_hpo.py --study gpt-neo-hpo-v1` for the full trial table.
 
+> **⚠️ Known bug affecting all results above (fixed in `gpt-neo-hpo-v2`)**: `EmailDataset` did not mask padding positions in `labels`, so the loss included "predict eos" for every padded token. This inflates and destabilizes val loss in proportion to how much of a sequence is padding — worst at `max_length=512` (most padding) and especially bad for GPT-Neo's 256-token local attention window. It likely explains why `max_length=512` looked catastrophically worse for GPT-Neo than for GPT-2. **All val-loss numbers in this README (`attack-hpo-v4`, `gpt-neo-hpo-v1`) were computed under this buggy objective and are not comparable to results from `gpt-neo-hpo-v2` onward.** The fix (`labels[attention_mask == 0] = -100`) is in `main.py`'s `EmailDataset.__getitem__`. A fresh sweep (`gpt-neo-hpo-v2`, corrected objective) is in progress to re-evaluate whether `max_length=512` is actually viable for GPT-Neo-125M.
+
 ---
 
 ## Model
@@ -292,13 +294,24 @@ Best trial #13: val_loss=1.1324, lr=9.82e-05, batch_size=16, max_length=512, lr_
 weight_decay=0.0637, warmup_fraction=0.097, max_grad_norm=4.63 (see config above).
 Run `python view_hpo.py --study attack-hpo-v4` for the full trial table.
 
-### GPT-Neo 125M HPO (24 trials, converged)
+### GPT-Neo 125M HPO (24 trials, converged — superseded, see bug note above)
 
 Study `gpt-neo-hpo-v1`. Objective: minimize held-out val loss.
 Best trial #13: val_loss=1.5392, lr=3.42e-05, batch_size=32, max_length=256, lr_schedule=cosine,
 weight_decay=0.0618, warmup_fraction=0.0887, max_grad_norm=0.30 (see config above).
 All 3 `max_length=512` trials diverged and were pruned by epoch 2 (val_loss 2.07-15.00) — see note above.
 Run `python view_hpo.py --study gpt-neo-hpo-v1` for the full trial table.
+
+**These results used a buggy objective** (unmasked padding in `labels`, see warning above) and are not
+comparable to post-fix results. Superseded by `gpt-neo-hpo-v2`.
+
+### GPT-Neo 125M HPO v2 (corrected objective, in progress)
+
+Study `gpt-neo-hpo-v2`. Same search space as v1, but with the padding-mask fix applied to
+`EmailDataset.__getitem__` (`labels[attention_mask == 0] = -100`). This is a fresh study with no
+shared trial history — re-evaluates the full search space (including `max_length=512`) under the
+corrected, attack-type-agnostic val-loss objective. Run `python view_hpo.py --study gpt-neo-hpo-v2`
+for live results.
 
 ### DPFE paper reference (GPT-2 base, full fine-tune, σ=0)
 
