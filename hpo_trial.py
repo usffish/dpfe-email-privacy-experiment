@@ -91,22 +91,25 @@ def train_one_trial(trial, train_texts, val_texts, tokenizer, device):
     Returns (model, train_losses, val_losses).
     """
     # ── Sample hyperparameters ────────────────────────────────────────────────
-    lr            = trial.suggest_float("learning_rate", 1e-5, 5e-4, log=True)
+    lr            = trial.suggest_float("learning_rate", 5e-6, 5e-4, log=True)
     batch_size    = trial.suggest_categorical("batch_size", [2, 4, 8, 16, 32])
     max_length    = trial.suggest_categorical("max_length", [128, 256, 512])
     schedule      = trial.suggest_categorical("lr_schedule", ["linear", "cosine"])
     weight_decay  = trial.suggest_float("weight_decay", 0.0, 0.1)
     warmup_frac   = trial.suggest_float("warmup_fraction", 0.0, 0.1)
-    max_grad_norm = trial.suggest_float("max_grad_norm", 0.5, 5.0, log=True)
+    max_grad_norm = trial.suggest_float("max_grad_norm", 0.1, 5.0, log=True)
     # epochs is NOT sampled — HyperBand controls budget via pruning after each epoch.
     epochs = HPO["max_epochs"]
     accum_steps = CONFIG["grad_accum_steps"]
-    # Clamp batch_size to stay within 8 GB VRAM — activations scale as batch × seq_len².
-    # Empirically verified safe limits on GTX 1070 Ti (8 GB), GPT-2 base full fine-tune:
-    #   128 tokens × 32 batch — safe (attention cost 128²=small)
-    #   256 tokens × 16 batch — OOM;  256 × 8 — safe
-    #   512 tokens × 8  batch — OOM;  512 × 4 — safe
-    max_safe = {128: 32, 256: 8, 512: 4}
+    # Clamp batch_size to stay within VRAM — activations scale as batch × seq_len².
+    # Empirically verified on RTX A6000 (48 GB), GPT-Neo-125M full fine-tune,
+    # one forward+backward pass:
+    #   128 tokens × 32 batch —  8.7 GB
+    #   256 tokens × 32 batch — 17.5 GB
+    #   512 tokens × 32 batch — 36.8 GB;  512 × 64 — OOM
+    # 32 is the largest value in the batch_size search space and fits at all
+    # three lengths, so no clamping is needed on this GPU.
+    max_safe = {128: 32, 256: 32, 512: 32}
     batch_size = min(batch_size, max_safe[max_length])
     trial.set_user_attr("effective_batch_size", batch_size)
 

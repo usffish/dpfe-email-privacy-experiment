@@ -2,7 +2,7 @@
 
 Extends the DPFE paper's email privacy case study to compare **15 distinct attack strategies** against the same fine-tuned model. Instead of varying DP noise levels, this branch fixes noise at σ=0 and asks: *which extraction method is most effective?*
 
-Designed to run on the USF CIRCE cluster's `muma_2021` partition (RTX 6000, 24 GB VRAM) with a full fine-tuned GPT-2 base (117M), and to scale to GPT-Neo 125M with no code changes.
+Designed to run on the USF CIRCE cluster's `muma_2021` partition (RTX A6000, 48 GB VRAM) with a full fine-tuned GPT-2 base (117M), and to scale to GPT-Neo 125M with no code changes.
 
 ---
 
@@ -80,23 +80,25 @@ Attack success rate is still recorded per trial as an informational user attribu
 
 | Hyperparameter | Range | Type |
 |---|---|---|
-| `learning_rate` | [1e-5, 5e-4] | log-uniform |
-| `batch_size` | {2, 4, 8, 16, 32} (clamped per max_length) | categorical |
+| `learning_rate` | [5e-6, 5e-4] | log-uniform |
+| `batch_size` | {2, 4, 8, 16, 32} | categorical |
 | `max_length` | {128, 256, 512} | categorical |
 | `lr_schedule` | {linear, cosine} | categorical |
 | `weight_decay` | [0.0, 0.1] | uniform |
 | `warmup_fraction` | [0.0, 0.1] | uniform |
-| `max_grad_norm` | [0.5, 5.0] | log-uniform |
+| `max_grad_norm` | [0.1, 5.0] | log-uniform |
 
 **`epochs` is not a hyperparameter** — HyperBand controls training budget via per-epoch val loss pruning.
 
-**Memory constraints** (empirically validated on 8 GB GTX 1070 Ti, full fine-tune GPT-2 base):
+**Memory constraints** (empirically validated on RTX A6000 (48 GB), full fine-tune GPT-Neo-125M, one fwd+bwd pass):
 
-| max_length | max safe batch_size |
+| max_length | batch_size=32 peak VRAM |
 |---|---|
-| 128 | 32 |
-| 256 | 8 |
-| 512 | 4 |
+| 128 | 8.7 GB |
+| 256 | 17.5 GB |
+| 512 | 36.8 GB |
+
+`batch_size=32` (the largest in the search space) fits at all three lengths with headroom — no clamping needed on this GPU. (The old 8 GB GTX 1070 Ti limits — which clamped `max_length=512` down to `batch_size=4` — were removed; this likely caused the early HyperBand pruning of both `max_length=512` trials in the first `gpt-neo-hpo-v1` batch.)
 
 ### Findings from v2 sweep (26 trials, attack-rate objective)
 
@@ -137,7 +139,7 @@ These values are now applied as the defaults in `run_attacks.sbatch`. Run `pytho
 | Context window | 1,024 tokens |
 | Pre-training | WebText (~40 GB), no ENRON exposure |
 
-**GPT-Neo 125M** — full fine-tuning on the `muma_2021` partition (RTX 6000, 24 GB VRAM), no code changes needed. HPO sweep `gpt-neo-hpo-v1` (`run_hpo_gptneo.sbatch`) is in progress to find its own best hyperparameters rather than transferring GPT-2's.
+**GPT-Neo 125M** — full fine-tuning on the `muma_2021` partition (RTX A6000, 48 GB VRAM), no code changes needed. HPO sweep `gpt-neo-hpo-v1` (`run_hpo_gptneo.sbatch`) is in progress to find its own best hyperparameters rather than transferring GPT-2's.
 
 ---
 
@@ -218,7 +220,7 @@ All hyperparameters are set via environment variables exported in the sbatch scr
 | `MAX_LENGTH` | `512` | Token sequence length (HPO finding: 512 >> 128) |
 | `MAX_GRAD_NORM` | `4.63` | Gradient clipping (v4 HPO best) |
 | `MAX_EMAILS` | `50000` | Training corpus size |
-| `USE_LORA` | `0` | Full fine-tuning (RTX 6000 has enough VRAM) |
+| `USE_LORA` | `0` | Full fine-tuning (RTX A6000 has enough VRAM) |
 | `SEED` | `42` | Random seed |
 | `FRESH` | `0` | Set `1` to wipe OUTPUT_DIR before starting |
 | `SMOKE` | `0` | Set `1` for a fast ~15 min end-to-end check |
@@ -283,7 +285,7 @@ Study `gpt-neo-hpo-v1`, running on `muma_2021`. Run `python view_hpo.py --study 
 |---|---|
 | Cluster | CIRCE (`circe.rc.usf.edu`) |
 | Partition | `muma_2021` (requires `--qos=muma21`) |
-| GPU | NVIDIA RTX 6000 (24 GB) |
+| GPU | NVIDIA RTX A6000 (48 GB) |
 | Python env | Conda: `my_environment` (Python 3.11) |
 
 ### First-time setup
