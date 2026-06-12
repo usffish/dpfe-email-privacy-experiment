@@ -305,13 +305,38 @@ Run `python view_hpo.py --study gpt-neo-hpo-v1` for the full trial table.
 **These results used a buggy objective** (unmasked padding in `labels`, see warning above) and are not
 comparable to post-fix results. Superseded by `gpt-neo-hpo-v2`.
 
-### GPT-Neo 125M HPO v2 (corrected objective, in progress)
+### GPT-Neo 125M HPO v2 (corrected objective, converged — 24 trials)
 
 Study `gpt-neo-hpo-v2`. Same search space as v1, but with the padding-mask fix applied to
-`EmailDataset.__getitem__` (`labels[attention_mask == 0] = -100`). This is a fresh study with no
-shared trial history — re-evaluates the full search space (including `max_length=512`) under the
-corrected, attack-type-agnostic val-loss objective. Run `python view_hpo.py --study gpt-neo-hpo-v2`
-for live results.
+`EmailDataset.__getitem__` (`labels[attention_mask == 0] = -100`). Fresh study with no shared
+trial history. Converged after 24 trials (3 batches of 8): best val_loss improved 2.2507 →
+2.2413 (0.42%) in the final batch, second consecutive batch under the 1% threshold.
+
+**Best config (trial #20, val_loss = 2.2413, epoch 5):**
+
+| Hyperparameter | Value |
+|---|---|
+| learning_rate | 1.95e-05 |
+| batch_size | 32 |
+| max_length | **512** |
+| lr_schedule | cosine |
+| weight_decay | 0.0799 |
+| warmup_fraction | 0.0780 |
+| max_grad_norm | 0.49 |
+
+For `run_attacks.sbatch`: `LEARNING_RATE=1.95e-05 BATCH_SIZE=32 MAX_GRAD_NORM=0.49 MAX_LENGTH=512 USE_LORA=0` (cosine schedule).
+
+**Headline finding — v1's max_length=512 divergence was an artifact.** Under the corrected
+objective, the top 5 trials are ALL `max_length=512` (2.2413–2.2581), `max_length=128` trails
+at ≥2.356, and in batch 3 TPE sampled 512 for all 8 trials. The "divergence" (val loss 7–15)
+seen in v1 was entirely the padding-label bug inflating loss in proportion to padding. The
+viable lr band is ~1e-5–1e-4 (sweet spot ~2e-5); everything above ~1.8e-4 had rising val loss
+and was pruned. Caveat: top-trial val losses sit within ~0.7% of each other, so the exact
+winner among the leaders is somewhat seed-dependent; the robust conclusions are 512 ≫ 128 and
+the lr band. Attack rates (informational): 0.07–0.17% across completed trials.
+
+Full table: `python view_hpo.py --study gpt-neo-hpo-v2`. Next step: the long-context probe
+below (`gpt-neo-len-probe`) tests whether 768/1024 helps further.
 
 ### GPT-Neo 125M long-context probe (gpt-neo-len-probe, prepared — not yet launched)
 
