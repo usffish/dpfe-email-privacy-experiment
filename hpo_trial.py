@@ -19,7 +19,9 @@ Usage:
 
 import gc
 import os
+import random
 import sys
+import time
 
 import optuna
 import torch
@@ -275,6 +277,12 @@ def main():
     print(f"Attack  : {HPO['attack']} (informational only)")
     print(f"Model   : {CONFIG['model_name']}")
     print(f"Objective: minimize validation loss")
+
+    # Stagger create_study() across parallel jobs — when many jobs hit the
+    # journal file's _sync_with_backend() at the same instant, concurrent
+    # NFS appends can interleave and corrupt a log line (seen as a
+    # UnicodeDecodeError on a NUL-padded line on the next read).
+    time.sleep(random.uniform(0, 20))
 
     # JournalFileStorage: append-only writes are NFS-safe (SQLite fails on NFS).
     storage = optuna.storages.JournalStorage(

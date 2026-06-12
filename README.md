@@ -124,6 +124,34 @@ Study `attack-hpo-v4` (11 complete, 13 pruned). Best trial **#13**, val_loss=1.1
 
 These values are now applied as the defaults in `run_attacks.sbatch`. Run `python view_hpo.py --study attack-hpo-v4` for the full trial table and parameter-importance breakdown.
 
+### Best config (GPT-Neo 125M HPO results)
+
+Study `gpt-neo-hpo-v1` (24 trials: 8 complete, 16 pruned, converged). Best trial **#13**, val_loss=1.5392 (epoch 4):
+
+| Hyperparameter | Value |
+|---|---|
+| `learning_rate` | 3.42e-05 |
+| `batch_size` | 32 |
+| `max_length` | 256 |
+| `lr_schedule` | cosine |
+| `weight_decay` | 0.0618 |
+| `warmup_fraction` | 0.0887 |
+| `max_grad_norm` | 0.30 |
+
+To use these for a GPT-Neo attack run:
+```bash
+export LEARNING_RATE=3.42e-05
+export BATCH_SIZE=32
+export MAX_GRAD_NORM=0.30
+export MAX_LENGTH=256
+export USE_LORA=0
+export MODEL_NAME=EleutherAI/gpt-neo-125M
+```
+
+**`max_length=512` is unstable for GPT-Neo-125M** — unlike GPT-2, where 512 dominates the top configs. All 3 trials that sampled `max_length=512` (#1, #2, #11) were pruned by epoch 2 with diverging val loss (2.07, 4.54, and 15.00 — the last is worse than a uniform-random baseline over the vocab, indicating near-collapse). All 3 also happened to sample relatively high learning rates (1.27e-4 to 1.6e-4); whether 512 is viable for GPT-Neo at the lower LRs (~3e-5) that work well at 256 remains untested. The top 5 completed trials (val_loss 1.539-1.551) all cluster around `max_length=256, lr≈5e-6 to 3.4e-5, cosine`.
+
+Run `python view_hpo.py --study gpt-neo-hpo-v1` for the full trial table.
+
 ---
 
 ## Model
@@ -139,7 +167,7 @@ These values are now applied as the defaults in `run_attacks.sbatch`. Run `pytho
 | Context window | 1,024 tokens |
 | Pre-training | WebText (~40 GB), no ENRON exposure |
 
-**GPT-Neo 125M** — full fine-tuning on the `muma_2021` partition (RTX A6000, 48 GB VRAM), no code changes needed. HPO sweep `gpt-neo-hpo-v1` (`run_hpo_gptneo.sbatch`) is in progress to find its own best hyperparameters rather than transferring GPT-2's.
+**GPT-Neo 125M** — full fine-tuning on the `muma_2021` partition (RTX A6000, 48 GB VRAM), no code changes needed. HPO sweep `gpt-neo-hpo-v1` (`run_hpo_gptneo.sbatch`, 24 trials) found its own best hyperparameters rather than transferring GPT-2's — notably `max_length=256` rather than GPT-2's `512` (see "Best config (GPT-Neo 125M HPO results)" below).
 
 ---
 
@@ -264,9 +292,13 @@ Best trial #13: val_loss=1.1324, lr=9.82e-05, batch_size=16, max_length=512, lr_
 weight_decay=0.0637, warmup_fraction=0.097, max_grad_norm=4.63 (see config above).
 Run `python view_hpo.py --study attack-hpo-v4` for the full trial table.
 
-### GPT-Neo 125M HPO (in progress)
+### GPT-Neo 125M HPO (24 trials, converged)
 
-Study `gpt-neo-hpo-v1`, running on `muma_2021`. Run `python view_hpo.py --study gpt-neo-hpo-v1` to monitor.
+Study `gpt-neo-hpo-v1`. Objective: minimize held-out val loss.
+Best trial #13: val_loss=1.5392, lr=3.42e-05, batch_size=32, max_length=256, lr_schedule=cosine,
+weight_decay=0.0618, warmup_fraction=0.0887, max_grad_norm=0.30 (see config above).
+All 3 `max_length=512` trials diverged and were pruned by epoch 2 (val_loss 2.07-15.00) — see note above.
+Run `python view_hpo.py --study gpt-neo-hpo-v1` for the full trial table.
 
 ### DPFE paper reference (GPT-2 base, full fine-tune, σ=0)
 
