@@ -313,6 +313,25 @@ shared trial history — re-evaluates the full search space (including `max_leng
 corrected, attack-type-agnostic val-loss objective. Run `python view_hpo.py --study gpt-neo-hpo-v2`
 for live results.
 
+### GPT-Neo 125M long-context probe (gpt-neo-len-probe, prepared — not yet launched)
+
+Follow-up to v2: under the corrected objective `max_length=512` leads, and ~22% of emails are
+still truncated at 512 tokens (~10% at 1024; median 198, mean 621 tokens, GPT-Neo tokenizer).
+This probe searches `max_length ∈ {768, 1024}` with lr capped at 1e-4 (the divergent high-lr
+region needs no re-exploration). It is a separate study because Optuna can't extend a
+categorical's choices mid-study. Search-space overrides go through new env vars
+(`HPO_MAX_LENGTH_CHOICES`, `HPO_LR_MIN`, `HPO_LR_MAX`) in `hpo_trial.py`, which also gained
+conservative VRAM batch caps for 768 (bs≤16) and 1024 (bs≤8). Launch after v2 converges:
+
+```bash
+python enqueue_len_probe.py   # optional: seed 4 trials from the v2 winner's regime
+bash submit_hpo.sh 8 gpt-neo-len-probe run_hpo_gptneo_probe.sbatch
+```
+
+Caveat: val losses are not strictly comparable across max_length values (different evaluation
+token sets) — for the final call, also evaluate candidate models at a fixed eval length or
+defer to the downstream attack metric.
+
 ### DPFE paper reference (GPT-2 base, full fine-tune, σ=0)
 
 | Attack Success Rate | Correctness |

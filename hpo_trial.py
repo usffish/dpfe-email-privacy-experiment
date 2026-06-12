@@ -60,6 +60,14 @@ HPO = {
     "pairs":      int(os.getenv("HPO_PAIRS", "3238")),    # attack pairs (informational only)
     "attack":     os.getenv("HPO_ATTACK", "zs_d_greedy"), # attack stored as user_attr
     "max_epochs": int(os.getenv("HPO_MAX_EPOCHS", "5")),  # HyperBand max_resource
+    # Search-space overrides for separate probe studies (e.g. longer contexts).
+    # Optuna forbids changing a categorical's choices within an existing study,
+    # so only set these for NEW studies — never for one that already has trials.
+    "max_length_choices": [
+        int(x) for x in os.getenv("HPO_MAX_LENGTH_CHOICES", "128,256,512").split(",")
+    ],
+    "lr_min": float(os.getenv("HPO_LR_MIN", "5e-6")),
+    "lr_max": float(os.getenv("HPO_LR_MAX", "5e-4")),
 }
 
 
@@ -93,9 +101,9 @@ def train_one_trial(trial, train_texts, val_texts, tokenizer, device):
     Returns (model, train_losses, val_losses).
     """
     # ── Sample hyperparameters ────────────────────────────────────────────────
-    lr            = trial.suggest_float("learning_rate", 5e-6, 5e-4, log=True)
+    lr            = trial.suggest_float("learning_rate", HPO["lr_min"], HPO["lr_max"], log=True)
     batch_size    = trial.suggest_categorical("batch_size", [2, 4, 8, 16, 32])
-    max_length    = trial.suggest_categorical("max_length", [128, 256, 512])
+    max_length    = trial.suggest_categorical("max_length", HPO["max_length_choices"])
     schedule      = trial.suggest_categorical("lr_schedule", ["linear", "cosine"])
     weight_decay  = trial.suggest_float("weight_decay", 0.0, 0.1)
     warmup_frac   = trial.suggest_float("warmup_fraction", 0.0, 0.1)
@@ -111,7 +119,10 @@ def train_one_trial(trial, train_texts, val_texts, tokenizer, device):
     #   512 tokens × 32 batch — 36.8 GB;  512 × 64 — OOM
     # 32 is the largest value in the batch_size search space and fits at all
     # three lengths, so no clamping is needed on this GPU.
-    max_safe = {128: 32, 256: 32, 512: 32}
+    # 768/1024 caps are conservative extrapolations from the 512×32 measurement
+    # (per-sample activation cost grows superlinearly with seq_len) — not yet
+    # empirically verified.
+    max_safe = {128: 32, 256: 32, 512: 32, 768: 16, 1024: 8}
     batch_size = min(batch_size, max_safe[max_length])
     trial.set_user_attr("effective_batch_size", batch_size)
 
