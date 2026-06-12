@@ -2,7 +2,7 @@
 
 Extends the DPFE paper's email privacy case study to compare **15 distinct attack strategies** against the same fine-tuned model. Instead of varying DP noise levels, this branch fixes noise at σ=0 and asks: *which extraction method is most effective?*
 
-Designed to run on the USF CIRCE cluster (GTX 1070 Ti, 8 GB VRAM) with a full fine-tuned GPT-2 base (117M), and to scale to GPT-Neo on an A6000/L40S with no code changes.
+Designed to run on the USF CIRCE cluster's `muma_2021` partition (RTX 6000, 24 GB VRAM) with a full fine-tuned GPT-2 base (117M), and to scale to GPT-Neo 125M with no code changes.
 
 ---
 
@@ -68,7 +68,7 @@ Include explicitly with `ATTACK_TYPES=context_50,context_100,context_200`.
 
 ## Hyperparameter Tuning (BOHB)
 
-Training hyperparameters were selected using **BOHB** (Bayesian Optimization + HyperBand) via `optuna`, running 8 parallel trials at a time on CIRCE's `snsm_itn19` partition.
+Training hyperparameters were selected using **BOHB** (Bayesian Optimization + HyperBand) via `optuna`, running 8 parallel trials at a time on CIRCE's `muma_2021` partition (requires `--qos=muma21`).
 
 ### Objective: minimize validation loss
 
@@ -106,9 +106,21 @@ These informed the v3 search priors but the best config will be re-confirmed und
 - **LR sweet spot**: ~1.5e-04 to 5e-04 for 512-token full fine-tuning.
 - **Correctness–memorization tradeoff**: very high LR drives train loss lower but degrades email format correctness.
 
-### Best config (v3 results pending)
+### Best config (v4 results — GPT-2 base)
 
-Run `python view_hpo.py --study attack-hpo-v3` after completing the sweep.
+Study `attack-hpo-v4` (11 complete, 13 pruned). Best trial **#13**, val_loss=1.1324 (epoch 2):
+
+| Hyperparameter | Value |
+|---|---|
+| `learning_rate` | 9.82e-05 |
+| `batch_size` | 16 |
+| `max_length` | 512 |
+| `lr_schedule` | linear |
+| `weight_decay` | 0.0637 |
+| `warmup_fraction` | 0.0970 |
+| `max_grad_norm` | 4.63 |
+
+These values are now applied as the defaults in `run_attacks.sbatch`. Run `python view_hpo.py --study attack-hpo-v4` for the full trial table and parameter-importance breakdown.
 
 ---
 
@@ -125,7 +137,7 @@ Run `python view_hpo.py --study attack-hpo-v3` after completing the sweep.
 | Context window | 1,024 tokens |
 | Pre-training | WebText (~40 GB), no ENRON exposure |
 
-**Future (A6000/L40S):** GPT-Neo 1.3B with full fine-tuning, no code changes needed. LR transfers via μP scaling: `LR_neo = 1.56e-04 × (768/2048) ≈ 5.8e-05`.
+**GPT-Neo 125M** — full fine-tuning on the `muma_2021` partition (RTX 6000, 24 GB VRAM), no code changes needed. HPO sweep `gpt-neo-hpo-v1` (`run_hpo_gptneo.sbatch`) is in progress to find its own best hyperparameters rather than transferring GPT-2's.
 
 ---
 
@@ -175,14 +187,18 @@ python compare_results.py results/gpt2-base-attacks results/gpt2-large-attacks
 ### Run the BOHB HPO sweep
 
 ```bash
-# Submit N parallel trials (default 8)
+# Submit N parallel trials (default 8, gpt2, study attack-hpo-v4)
 bash submit_hpo.sh 8
 
 # Monitor progress from any node
-python view_hpo.py --study attack-hpo-v3
+python view_hpo.py --study attack-hpo-v4
 
 # Submit more trials later
-bash submit_hpo.sh 8 attack-hpo-v3
+bash submit_hpo.sh 8 attack-hpo-v4
+
+# GPT-Neo 125M sweep (separate study + sbatch)
+bash submit_hpo.sh 8 gpt-neo-hpo-v1 run_hpo_gptneo.sbatch
+python view_hpo.py --study gpt-neo-hpo-v1
 ```
 
 Each SLURM job runs one trial: trains on 9k emails (10% held out as val set), computes val loss per epoch for HyperBand pruning, then runs `zs_d_greedy` attack on 3,238 pairs as an informational check. HyperBand prunes bad configs after epoch 1 (~20 min). Surviving configs run to epoch 3 (~40–60 min total).
@@ -195,14 +211,14 @@ All hyperparameters are set via environment variables exported in the sbatch scr
 | Variable | Default | Description |
 |---|---|---|
 | `MODEL_NAME` | `gpt2` | HuggingFace model ID |
-| `LEARNING_RATE` | `1.56e-04` | AdamW learning rate (HPO best) |
-| `BATCH_SIZE` | `2` | Physical batch size (effective 16 with grad accum) |
+| `LEARNING_RATE` | `9.82e-05` | AdamW learning rate (v4 HPO best, trial #13) |
+| `BATCH_SIZE` | `16` | Physical batch size (v4 HPO best) |
 | `GRAD_ACCUM_STEPS` | `8` | Gradient accumulation steps |
 | `EPOCHS` | `3` | Fine-tuning epochs |
 | `MAX_LENGTH` | `512` | Token sequence length (HPO finding: 512 >> 128) |
-| `MAX_GRAD_NORM` | `1.74` | Gradient clipping (HPO best) |
+| `MAX_GRAD_NORM` | `4.63` | Gradient clipping (v4 HPO best) |
 | `MAX_EMAILS` | `50000` | Training corpus size |
-| `USE_LORA` | `0` | Set `1` for LoRA (for future GPT-Neo if VRAM is tight) |
+| `USE_LORA` | `0` | Full fine-tuning (RTX 6000 has enough VRAM) |
 | `SEED` | `42` | Random seed |
 | `FRESH` | `0` | Set `1` to wipe OUTPUT_DIR before starting |
 | `SMOKE` | `0` | Set `1` for a fast ~15 min end-to-end check |
@@ -218,12 +234,12 @@ All hyperparameters are set via environment variables exported in the sbatch scr
 #### HPO
 | Variable | Default | Description |
 |---|---|---|
-| `HPO_STUDY_NAME` | `attack-hpo-v3` | Optuna study name |
+| `HPO_STUDY_NAME` | `attack-hpo-v4` (or `gpt-neo-hpo-v1`) | Optuna study name |
 | `HPO_STORAGE` | `~/dpfe-email-privacy-experiment/hpo_study.jsonl` | Shared journal file |
 | `HPO_EMAILS` | `10000` | Total emails per trial (90% train, 10% val) |
 | `HPO_VAL_FRAC` | `0.1` | Fraction held out for validation loss |
 | `HPO_PAIRS` | `3238` | Attack pairs recorded as user_attr (informational) |
-| `HPO_MAX_EPOCHS` | `3` | HyperBand max resource (epochs) |
+| `HPO_MAX_EPOCHS` | `5` | HyperBand max resource (epochs) |
 
 ---
 
@@ -239,10 +255,16 @@ Objective was `zs_d_greedy` attack success rate. Top results shown for reference
 | #29 | 1.56e-04 | 512 | 0.79 | 5 | 0.17% | 71.9% |
 | #48 | 4.88e-04 | 512 | 0.57 | 6 | 0.20% | 54.1% |
 
-### HPO v3 (val-loss objective — pending)
+### HPO v4 (val-loss objective, 11 complete trials)
 
-Study `attack-hpo-v3`. Objective: minimize held-out val loss (attack-type-agnostic).
-Run `python view_hpo.py --study attack-hpo-v3` to see results as trials complete.
+Study `attack-hpo-v4`. Objective: minimize held-out val loss (attack-type-agnostic).
+Best trial #13: val_loss=1.1324, lr=9.82e-05, batch_size=16, max_length=512, lr_schedule=linear,
+weight_decay=0.0637, warmup_fraction=0.097, max_grad_norm=4.63 (see config above).
+Run `python view_hpo.py --study attack-hpo-v4` for the full trial table.
+
+### GPT-Neo 125M HPO (in progress)
+
+Study `gpt-neo-hpo-v1`, running on `muma_2021`. Run `python view_hpo.py --study gpt-neo-hpo-v1` to monitor.
 
 ### DPFE paper reference (GPT-2 base, full fine-tune, σ=0)
 
@@ -260,8 +282,8 @@ Run `python view_hpo.py --study attack-hpo-v3` to see results as trials complete
 | Setting | Value |
 |---|---|
 | Cluster | CIRCE (`circe.rc.usf.edu`) |
-| Partition | `snsm_itn19` |
-| GPU | NVIDIA GTX 1070 Ti (8 GB) |
+| Partition | `muma_2021` (requires `--qos=muma21`) |
+| GPU | NVIDIA RTX 6000 (24 GB) |
 | Python env | Conda: `my_environment` (Python 3.11) |
 
 ### First-time setup
@@ -302,6 +324,8 @@ REAL_HOME=/home/i/ismailj   # replace ismailj with your NetID
 **SQLite fails on NFS home dirs** — CIRCE home directories are NFS-mounted; SQLite's file locking is unreliable on NFS. The HPO study uses `JournalFileBackend` (append-only writes, NFS-safe) instead of SQLite.
 
 **GCC 4.8.2 on compute nodes** — the system GCC is too old to compile `greenlet` from source. Install it with: `pip install greenlet --only-binary=:all:` to force a pre-built wheel.
+
+**`muma_2021` requires `--qos=muma21`** — the partition's allowed QOS list doesn't include a default, so `sbatch` fails with "Invalid qos specification" unless `#SBATCH --qos=muma21` is set explicitly. All sbatch scripts in this repo already set it.
 
 ---
 
