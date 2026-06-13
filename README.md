@@ -338,36 +338,40 @@ the lr band. Attack rates (informational): 0.07–0.17% across completed trials.
 Full table: `python view_hpo.py --study gpt-neo-hpo-v2`. Next step: the long-context probe
 below (`gpt-neo-len-probe`) tests whether 768/1024 helps further.
 
-### GPT-Neo 125M long-context probe (gpt-neo-len-probe, prepared — not yet launched)
+### GPT-Neo 125M long-context probe (gpt-neo-len-probe, complete — 8 trials)
 
 Follow-up to v2: under the corrected objective `max_length=512` leads, and ~22% of emails are
 still truncated at 512 tokens (~10% at 1024; median 198, mean 621 tokens, GPT-Neo tokenizer).
-This probe searches `max_length ∈ {768, 1024}` with a search space tightened from v2 evidence:
-lr capped at 1e-4 (everything above ~6e-5 was pruned in v2), batch_size 2/4 dropped (uniformly
-weak in v2), and weight_decay/warmup ceilings raised to 0.3/0.2 (the v2 winner sat at
-0.096/0.096, within 5% of the old 0.1 caps — boundary-hugging suggests the optimum may lie
-outside). It is a separate study because Optuna can't change distributions mid-study.
-Overrides go through env vars in `hpo_trial.py` (`HPO_MAX_LENGTH_CHOICES`,
-`HPO_BATCH_SIZE_CHOICES`, `HPO_LR_MIN`/`HPO_LR_MAX`, `HPO_WD_MAX`, `HPO_WARMUP_MAX`), which
-also gained conservative VRAM batch caps for 768 (bs≤16) and 1024 (bs≤8), and a
-token-weighted `compute_val_loss` (was batch-averaged, which over-weighted tokens in
-sparsely-filled batches by an amount that varied with batch_size).
+This probe searched `max_length ∈ {768, 1024}` with a search space tightened from v2 evidence:
+lr capped at 1e-4, batch_size 2/4 dropped, weight_decay/warmup ceilings raised to 0.3/0.2, and
+conservative VRAM batch caps for 768 (bs≤16) and 1024 (bs≤8). Token-weighted
+`compute_val_loss` (env-configurable via `HPO_MAX_LENGTH_CHOICES`, `HPO_BATCH_SIZE_CHOICES`,
+`HPO_LR_MIN`/`HPO_LR_MAX`, `HPO_WD_MAX`, `HPO_WARMUP_MAX`) was applied. Synced to circe only
+after `gpt-neo-hpo-v2` fully converged, to keep v2's objective consistent across its batches.
 
-**Launch only after `gpt-neo-hpo-v2` has fully converged**, because the token-weighted
-val-loss fix slightly changes computed values — syncing it to circe mid-study would make
-v2's objective inconsistent across batches:
+Results (8 trials, all completed or pruned cleanly):
 
-```bash
-# from local machine: sync the updated trial code first
-scp hpo_trial.py circe:~/dpfe-email-privacy-experiment/
-# then on circe:
-python enqueue_len_probe.py   # optional: seed 4 trials from the v2 winner's regime
-bash submit_hpo.sh 8 gpt-neo-len-probe run_hpo_gptneo_probe.sbatch
-```
+| Trial | max_length | lr | batch_size | schedule | val_loss | state |
+|-------|-----------|-----|-----------|----------|----------|-------|
+| 1 | 768 | 3.0e-05 | 16 | linear | **2.2203** | complete (best) |
+| 0 | 768 | 1.1e-05 | 16 | linear | 2.2222 | complete |
+| 4 | 768 | 3.63e-05 | 4 | cosine | 2.2261 | complete |
+| 2 | 1024 | 1.1e-05 | 16 | linear | 2.2278 | complete |
+| 6 | 768 | 2.26e-05 | 8 | cosine | 2.2322 | pruned |
+| 5 | 1024 | 6.36e-06 | 8 | linear | 2.2373 | pruned |
+| 3 | 1024 | 3.0e-05 | 16 | linear | 2.2476 | pruned |
+| 7 | 1024 | 6.43e-05 | 4 | linear | 2.4141 | pruned |
 
-Caveat: val losses are not strictly comparable across max_length values (different evaluation
-token sets) — for the final call, also evaluate candidate models at a fixed eval length or
-defer to the downstream attack metric.
+Best (trial #1, `max_length=768`): val_loss=2.2203 vs v2's 512 baseline of 2.2413 — a 0.94%
+improvement. All three completed `max_length=768` trials (2.2203–2.2261) beat the completed
+`max_length=1024` trial (2.2278) and the 512 baseline; 1024 shows no further benefit and its
+other trials were pruned worse. However, 0.94% is comparable to the ~0.7% spread among v2's
+top-3 trials at 512 — i.e. within noise — and the comparison is confounded by different
+evaluation token sets per `max_length` and by v2's val_loss being batch-averaged vs this
+probe's token-weighted. **Verdict: no further HPO on `max_length` for GPT-Neo** — 512 and 768
+are statistically indistinguishable from this probe; defer the final 512-vs-768 call to the
+downstream attack-success metric rather than spending more compute on val-loss differences
+this small.
 
 ### DPFE paper reference (GPT-2 base, full fine-tune, σ=0)
 
