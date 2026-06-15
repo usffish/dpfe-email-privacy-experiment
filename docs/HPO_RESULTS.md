@@ -1,9 +1,9 @@
 # Hyperparameter Tuning — Full Sweep History
 
 This is the chronological record of every BOHB (Bayesian Optimization + HyperBand, via
-Optuna) sweep run for this project. For the final winning configs and the GPT-2-vs-GPT-Neo
-model-selection verdict, see the "Hyperparameter Tuning" section of the main
-[README](../README.md) — this doc is the detailed reference/lab-notebook version.
+Optuna) sweep run for this project. For the final winning config, see the "Hyperparameter
+Tuning" section of the main [README](../README.md) — this doc is the detailed
+reference/lab-notebook version.
 
 All sweeps were run on CIRCE's `muma_2021` partition (`--qos=muma21`), 8 parallel trials at a
 time via `bash submit_hpo.sh`.
@@ -51,89 +51,6 @@ HyperBand pruning of both `max_length=512` trials in the first `gpt-neo-hpo-v1` 
 
 ---
 
-## HPO v2 (attack-rate objective, 26 trials — superseded)
-
-Objective was `zs_d_greedy` attack success rate. Top results shown for reference; these
-hyperparameters biased the search toward one attack type and are superseded by v4/v5.
-
-| Trial | lr | max_len | val_loss | hits | attack% | correct% |
-|---|---|---|---|---|---|---|
-| #28 | 1.56e-04 | 512 | 0.78 | 5 | 0.17% | 67.2% |
-| #29 | 1.56e-04 | 512 | 0.79 | 5 | 0.17% | 71.9% |
-| #48 | 4.88e-04 | 512 | 0.57 | 6 | 0.20% | 54.1% |
-
-These informed the v3 search priors but the best config was re-confirmed under the val loss
-objective in v4/v5:
-
-- **`max_length=512` dominates** — all top configs use it. 128-token sequences max out at 1
-  hit; 512-token sequences get 4–6 hits.
-- **LR sweet spot**: ~1.5e-04 to 5e-04 for 512-token full fine-tuning.
-- **Correctness–memorization tradeoff**: very high LR drives train loss lower but degrades
-  email format correctness.
-
----
-
-## HPO v4 (val-loss objective, GPT-2, 11 complete trials)
-
-Study `attack-hpo-v4`. Objective: minimize held-out val loss (attack-type-agnostic).
-
-Best trial **#13**, val_loss=1.1324 (epoch 2):
-
-| Hyperparameter | Value |
-|---|---|
-| `learning_rate` | 9.82e-05 |
-| `batch_size` | 16 |
-| `max_length` | 512 |
-| `lr_schedule` | linear |
-| `weight_decay` | 0.0637 |
-| `warmup_fraction` | 0.0970 |
-| `max_grad_norm` | 4.63 |
-
-Run `python view_hpo.py --study attack-hpo-v4` for the full trial table and
-parameter-importance breakdown.
-
-> **⚠️ Known bug affecting v4's val_loss numbers (fixed in v5/gpt-neo-hpo-v2)**: `EmailDataset`
-> did not mask padding positions in `labels`, so the loss included "predict eos" for every
-> padded token. This inflates and destabilizes val loss in proportion to how much of a
-> sequence is padding — worst at `max_length=512` (most padding). The fix
-> (`labels[attention_mask == 0] = -100`) is in `main.py`'s `EmailDataset.__getitem__`.
-
----
-
-## GPT-2 HPO v5 (corrected objective, converged — 17 trials)
-
-Study `attack-hpo-v5`. Same padding-mask + token-weighted val-loss fix as `gpt-neo-hpo-v2`,
-plus a widened search space (`weight_decay` up to 0.3, `warmup_fraction` up to 0.2 — both
-baked into `slurm/run_hpo.sbatch` via `HPO_WD_MAX`/`HPO_WARMUP_MAX`, identical across all v5
-jobs).
-
-**Quick check (trial #0)**: re-ran v4's best config (lr=9.82e-05, batch_size=16,
-max_length=512, linear, weight_decay=0.0637, warmup_fraction=0.097, max_grad_norm=4.63) under
-the corrected objective: **val_loss=2.3696** (epoch 5, monotone 2.4607→2.3696), vs the old
-buggy value of 1.1324. The old number was an artifact — at `max_length=512`, GPT-2's unmasked
-padding/eos positions were scored as trivially easy, deflating the batch-averaged loss.
-
-Converged after 17 trials (1 seed + 2 batches of 8; 5 complete, 11 pruned, 1 failed with CUDA
-OOM at batch_size=32/max_length=512 — a one-off, not a search-space issue). Two consecutive
-batches found **no trial beating the seed's 2.3696** (counter hit 2/2). **GPT-2's optimal
-hyperparameters did not shift** from v4 despite exploring the widened wd/warmup ranges and the
-full lr range — trial #0 (= v4's winner) remains the best.
-
-| Rank | Trial | val_loss | max_length | lr | batch_size | schedule |
-|---|---|---|---|---|---|---|
-| 1 | 0 | **2.3696** | 512 | 9.82e-05 | 16 | linear |
-| 2 | 2 | 2.4213 | 256 | 7.93e-05 | 2 | cosine |
-| 3 | 13 | 2.4292 | 256 | 4.42e-05 | 2 | linear |
-| 4 | 4 | 2.4989 | 256 | 1.23e-05 | 8 | cosine |
-| 5 | 9 | 2.5158 | 256 | 1.01e-05 | 8 | linear |
-
-Full table: `python view_hpo.py --study attack-hpo-v5`.
-
-This config (trial #0 / v4's winner, val_loss=2.3696 corrected) is GPT-2's final answer —
-seeded into v5 via `hpo/enqueue_gpt2_v5_seed.py`.
-
----
-
 ## GPT-Neo 125M HPO v1 (24 trials, converged — superseded)
 
 Study `gpt-neo-hpo-v1`. Objective: minimize held-out val loss.
@@ -150,8 +67,7 @@ Best trial **#13**, val_loss=1.5392 (epoch 4):
 | `warmup_fraction` | 0.0887 |
 | `max_grad_norm` | 0.30 |
 
-**`max_length=512` looked unstable for GPT-Neo-125M** — unlike GPT-2, where 512 dominates the
-top configs. All 3 trials that sampled `max_length=512` (#1, #2, #11) were pruned by epoch 2
+**`max_length=512` looked unstable for GPT-Neo-125M.** All 3 trials that sampled `max_length=512` (#1, #2, #11) were pruned by epoch 2
 with diverging val loss (2.07, 4.54, and 15.00 — the last is worse than a uniform-random
 baseline over the vocab, indicating near-collapse). All 3 also happened to sample relatively
 high learning rates (1.27e-4 to 1.6e-4); whether 512 is viable for GPT-Neo at the lower LRs
@@ -163,8 +79,7 @@ Run `python view_hpo.py --study gpt-neo-hpo-v1` for the full trial table.
 > not mask padding positions in `labels`, so the loss included "predict eos" for every padded
 > token. This inflates and destabilizes val loss in proportion to how much of a sequence is
 > padding — worst at `max_length=512` (most padding) and especially bad for GPT-Neo's
-> 256-token local attention window. It likely explains why `max_length=512` looked
-> catastrophically worse for GPT-Neo than for GPT-2. **All val-loss numbers in this section
+> 256-token local attention window. **All val-loss numbers in this section
 > were computed under this buggy objective and are not comparable to `gpt-neo-hpo-v2` onward.**
 > The fix (`labels[attention_mask == 0] = -100`) is in `main.py`'s `EmailDataset.__getitem__`.
 > Superseded by `gpt-neo-hpo-v2` below.

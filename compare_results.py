@@ -4,7 +4,7 @@ Compare multi-attack-type results for email extraction experiments.
 Usage:
     python compare_results.py                          # ranked table
     python compare_results.py --csv                    # also export CSV
-    python compare_results.py results/gpt2-base-attacks results/gpt2-large-attacks
+    python compare_results.py results/gpt-neo-125m-attacks
 """
 
 import json
@@ -42,8 +42,7 @@ PATTERN_LABELS = {
 INFERABLE_PATTERNS = {k for k in PATTERN_LABELS if k not in ("z", "l")}
 
 DEFAULT_DIRS = [
-    "results/gpt2-base-attacks",
-    "results/gpt2-large-attacks",
+    "results/gpt-neo-125m-attacks",
 ]
 
 
