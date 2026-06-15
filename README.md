@@ -68,95 +68,43 @@ Include explicitly with `ATTACK_TYPES=context_50,context_100,context_200`.
 
 ## Hyperparameter Tuning (BOHB)
 
-Training hyperparameters were selected using **BOHB** (Bayesian Optimization + HyperBand) via `optuna`, running 8 parallel trials at a time on CIRCE's `muma_2021` partition (requires `--qos=muma21`).
+Training hyperparameters for both GPT-2 base and GPT-Neo 125M were selected using **BOHB**
+(Bayesian Optimization + HyperBand) via `optuna`, running 8 parallel trials at a time on
+CIRCE's `muma_2021` partition (`--qos=muma21`). The objective is **validation loss on a 10%
+held-out split** of the training corpus — not attack success rate — so the search doesn't get
+biased toward any one of the 15 attack prompts. Attack rate is still recorded per trial as an
+informational attribute (`python view_hpo.py --study <name>`).
 
-### Objective: minimize validation loss
+### Final configs (used by `slurm/run_attacks.sbatch`)
 
-The HPO objective is **validation loss on a 10% held-out split** of the training corpus — not attack success rate. This avoids biasing the hyperparameter search toward any particular extraction prompt: a config that lowers val loss generalizes better to all 15 attack types, whereas optimizing for `zs_d_greedy` specifically would prejudice the attack comparison.
-
-Attack success rate is still recorded per trial as an informational user attribute and can be inspected with `view_hpo.py`, but it does not drive the optimizer.
-
-### Search space
-
-| Hyperparameter | Range | Type |
+|  | GPT-2 base (`attack-hpo-v5`, trial #0) | GPT-Neo 125M (`gpt-neo-hpo-v2`, trial #20) |
 |---|---|---|
-| `learning_rate` | [5e-6, 5e-4] | log-uniform |
-| `batch_size` | {2, 4, 8, 16, 32} | categorical |
-| `max_length` | {128, 256, 512} | categorical |
-| `lr_schedule` | {linear, cosine} | categorical |
-| `weight_decay` | [0.0, 0.1] | uniform |
-| `warmup_fraction` | [0.0, 0.1] | uniform |
-| `max_grad_norm` | [0.1, 5.0] | log-uniform |
+| val_loss | 2.3696 | **2.2413** |
+| `learning_rate` | 9.82e-05 | 1.95e-05 |
+| `batch_size` | 16 | 32 |
+| `max_length` | 512 | 512 |
+| `lr_schedule` | linear | cosine |
+| `weight_decay` | 0.0637 | 0.0799 |
+| `warmup_fraction` | 0.0970 | 0.0780 |
+| `max_grad_norm` | 4.63 | 0.49 |
 
-**`epochs` is not a hyperparameter** — HyperBand controls training budget via per-epoch val loss pruning.
+### Model selection: GPT-Neo 125M wins
 
-**Memory constraints** (empirically validated on RTX A6000 (48 GB), full fine-tune GPT-Neo-125M, one fwd+bwd pass):
+| Model | max_length | val_loss |
+|---|---|---|
+| GPT-2 (v5 best) | 512 | 2.3696 |
+| GPT-Neo (v2 best) | 512 | **2.2413** |
+| GPT-Neo (len-probe best) | 768 | 2.2203 |
 
-| max_length | batch_size=32 peak VRAM |
-|---|---|
-| 128 | 8.7 GB |
-| 256 | 17.5 GB |
-| 512 | 36.8 GB |
+**GPT-Neo-125M outperforms GPT-2-base by ~5.4%** (vs GPT-2's 512 config) to **~6.3%** (vs
+GPT-Neo's 768 config) on held-out val loss, under a corrected, token-weighted objective (both
+models' earlier results were skewed by a padding-mask bug — see `docs/HPO_RESULTS.md`).
+`max_length=768` gives GPT-Neo a further ~0.94% improvement over 512, but that's within the
+noise of the top-3 spread at 512, so the final attack run used `max_length=512`.
 
-`batch_size=32` (the largest in the search space) fits at all three lengths with headroom — no clamping needed on this GPU. (The old 8 GB GTX 1070 Ti limits — which clamped `max_length=512` down to `batch_size=4` — were removed; this likely caused the early HyperBand pruning of both `max_length=512` trials in the first `gpt-neo-hpo-v1` batch.)
-
-### Findings from v2 sweep (26 trials, attack-rate objective)
-
-These informed the v3 search priors but the best config will be re-confirmed under the val loss objective:
-
-- **`max_length=512` dominates** — all top configs use it. 128-token sequences max out at 1 hit; 512-token sequences get 4–6 hits.
-- **LR sweet spot**: ~1.5e-04 to 5e-04 for 512-token full fine-tuning.
-- **Correctness–memorization tradeoff**: very high LR drives train loss lower but degrades email format correctness.
-
-### Best config (v4 results — GPT-2 base)
-
-Study `attack-hpo-v4` (11 complete, 13 pruned). Best trial **#13**, val_loss=1.1324 (epoch 2):
-
-| Hyperparameter | Value |
-|---|---|
-| `learning_rate` | 9.82e-05 |
-| `batch_size` | 16 |
-| `max_length` | 512 |
-| `lr_schedule` | linear |
-| `weight_decay` | 0.0637 |
-| `warmup_fraction` | 0.0970 |
-| `max_grad_norm` | 4.63 |
-
-These values are now applied as the defaults in `run_attacks.sbatch`. Run `python view_hpo.py --study attack-hpo-v4` for the full trial table and parameter-importance breakdown.
-
-**Re-confirmed under the corrected objective by `attack-hpo-v5`** (see Results below) — this
-exact config remains optimal (val_loss=2.3696 corrected vs the 1.1324 shown above, which was
-a padding-bug artifact); no default changes needed.
-
-### Best config (GPT-Neo 125M HPO results)
-
-Study `gpt-neo-hpo-v1` (24 trials: 8 complete, 16 pruned, converged). Best trial **#13**, val_loss=1.5392 (epoch 4):
-
-| Hyperparameter | Value |
-|---|---|
-| `learning_rate` | 3.42e-05 |
-| `batch_size` | 32 |
-| `max_length` | 256 |
-| `lr_schedule` | cosine |
-| `weight_decay` | 0.0618 |
-| `warmup_fraction` | 0.0887 |
-| `max_grad_norm` | 0.30 |
-
-To use these for a GPT-Neo attack run:
-```bash
-export LEARNING_RATE=3.42e-05
-export BATCH_SIZE=32
-export MAX_GRAD_NORM=0.30
-export MAX_LENGTH=256
-export USE_LORA=0
-export MODEL_NAME=EleutherAI/gpt-neo-125M
-```
-
-**`max_length=512` is unstable for GPT-Neo-125M** — unlike GPT-2, where 512 dominates the top configs. All 3 trials that sampled `max_length=512` (#1, #2, #11) were pruned by epoch 2 with diverging val loss (2.07, 4.54, and 15.00 — the last is worse than a uniform-random baseline over the vocab, indicating near-collapse). All 3 also happened to sample relatively high learning rates (1.27e-4 to 1.6e-4); whether 512 is viable for GPT-Neo at the lower LRs (~3e-5) that work well at 256 remains untested. The top 5 completed trials (val_loss 1.539-1.551) all cluster around `max_length=256, lr≈5e-6 to 3.4e-5, cosine`.
-
-Run `python view_hpo.py --study gpt-neo-hpo-v1` for the full trial table.
-
-> **⚠️ Known bug affecting all results above (fixed in `gpt-neo-hpo-v2`)**: `EmailDataset` did not mask padding positions in `labels`, so the loss included "predict eos" for every padded token. This inflates and destabilizes val loss in proportion to how much of a sequence is padding — worst at `max_length=512` (most padding) and especially bad for GPT-Neo's 256-token local attention window. It likely explains why `max_length=512` looked catastrophically worse for GPT-Neo than for GPT-2. **All val-loss numbers in this README (`attack-hpo-v4`, `gpt-neo-hpo-v1`) were computed under this buggy objective and are not comparable to results from `gpt-neo-hpo-v2` onward.** The fix (`labels[attention_mask == 0] = -100`) is in `main.py`'s `EmailDataset.__getitem__`. A fresh sweep (`gpt-neo-hpo-v2`, corrected objective) is in progress to re-evaluate whether `max_length=512` is actually viable for GPT-Neo-125M.
+Full sweep history — search space, memory constraints, and every trial table for v2/v4/v5,
+gpt-neo-hpo-v1/v2, and the long-context probe — lives in
+**[`docs/HPO_RESULTS.md`](docs/HPO_RESULTS.md)**.
 
 ---
 
@@ -173,7 +121,7 @@ Run `python view_hpo.py --study gpt-neo-hpo-v1` for the full trial table.
 | Context window | 1,024 tokens |
 | Pre-training | WebText (~40 GB), no ENRON exposure |
 
-**GPT-Neo 125M** — full fine-tuning on the `muma_2021` partition (RTX A6000, 48 GB VRAM), no code changes needed. HPO sweep `gpt-neo-hpo-v1` (`run_hpo_gptneo.sbatch`, 24 trials) found its own best hyperparameters rather than transferring GPT-2's — notably `max_length=256` rather than GPT-2's `512` (see "Best config (GPT-Neo 125M HPO results)" below).
+**GPT-Neo 125M** — full fine-tuning on the `muma_2021` partition (RTX A6000, 48 GB VRAM), no code changes needed. HPO sweep `gpt-neo-hpo-v2` (`slurm/run_hpo_gptneo.sbatch`, 24 trials) found its own best hyperparameters — `max_length=512`, same as GPT-2's, with a lower learning rate (see "Hyperparameter Tuning" above).
 
 ---
 
@@ -208,7 +156,7 @@ Requires Python ≥ 3.11, CUDA GPU, and `optuna` (for HPO only).
 ### Run the full attack experiment
 
 ```bash
-sbatch run_attacks.sbatch
+sbatch slurm/run_attacks.sbatch
 ```
 
 Trains once (no DP noise), then runs all 15 attack types. Results saved to `$OUTPUT_DIR/results.json`. Checkpoint/resume — restarting skips completed attack types.
@@ -233,7 +181,7 @@ python view_hpo.py --study attack-hpo-v4
 bash submit_hpo.sh 8 attack-hpo-v4
 
 # GPT-Neo 125M sweep (separate study + sbatch)
-bash submit_hpo.sh 8 gpt-neo-hpo-v1 run_hpo_gptneo.sbatch
+bash submit_hpo.sh 8 gpt-neo-hpo-v1 slurm/run_hpo_gptneo.sbatch
 python view_hpo.py --study gpt-neo-hpo-v1
 ```
 
@@ -280,145 +228,6 @@ All hyperparameters are set via environment variables exported in the sbatch scr
 ---
 
 ## Results
-
-### HPO v2 (attack-rate objective, 26 trials — superseded)
-
-Objective was `zs_d_greedy` attack success rate. Top results shown for reference; these hyperparameters biased the search toward one attack type and are superseded by v3.
-
-| Trial | lr | max_len | val_loss | hits | attack% | correct% |
-|---|---|---|---|---|---|---|
-| #28 | 1.56e-04 | 512 | 0.78 | 5 | 0.17% | 67.2% |
-| #29 | 1.56e-04 | 512 | 0.79 | 5 | 0.17% | 71.9% |
-| #48 | 4.88e-04 | 512 | 0.57 | 6 | 0.20% | 54.1% |
-
-### HPO v4 (val-loss objective, 11 complete trials)
-
-Study `attack-hpo-v4`. Objective: minimize held-out val loss (attack-type-agnostic).
-Best trial #13: val_loss=1.1324, lr=9.82e-05, batch_size=16, max_length=512, lr_schedule=linear,
-weight_decay=0.0637, warmup_fraction=0.097, max_grad_norm=4.63 (see config above).
-Run `python view_hpo.py --study attack-hpo-v4` for the full trial table.
-
-### GPT-2 HPO v5 (corrected objective, converged — 17 trials)
-
-Study `attack-hpo-v5`. Same padding-mask + token-weighted val-loss fix as `gpt-neo-hpo-v2`,
-plus the widened search space (`weight_decay` up to 0.3, `warmup_fraction` up to 0.2 — both
-baked into `run_hpo.sbatch` via `HPO_WD_MAX`/`HPO_WARMUP_MAX`, identical across all v5 jobs).
-
-**Quick check (trial #0)**: re-ran v4's best config (lr=9.82e-05, batch_size=16,
-max_length=512, linear, weight_decay=0.0637, warmup_fraction=0.097, max_grad_norm=4.63) under
-the corrected objective: **val_loss=2.3696** (epoch 5, monotone 2.4607→2.3696), vs the old
-buggy value of 1.1324. The old number was an artifact — at `max_length=512`, GPT-2's
-unmasked padding/eos positions were scored as trivially easy, deflating the batch-averaged
-loss.
-
-Converged after 17 trials (1 seed + 2 batches of 8; 5 complete, 11 pruned, 1 failed with
-CUDA OOM at batch_size=32/max_length=512 — a one-off, not a search-space issue). Two
-consecutive batches found **no trial beating the seed's 2.3696** (counter hit 2/2).
-**GPT-2's optimal hyperparameters did not shift** from v4 despite exploring the widened
-wd/warmup ranges and the full lr range — trial #0 (= v4's winner) remains the best.
-
-| Rank | Trial | val_loss | max_length | lr | batch_size | schedule |
-|---|---|---|---|---|---|---|
-| 1 | 0 | **2.3696** | 512 | 9.82e-05 | 16 | linear |
-| 2 | 2 | 2.4213 | 256 | 7.93e-05 | 2 | cosine |
-| 3 | 13 | 2.4292 | 256 | 4.42e-05 | 2 | linear |
-| 4 | 4 | 2.4989 | 256 | 1.23e-05 | 8 | cosine |
-| 5 | 9 | 2.5158 | 256 | 1.01e-05 | 8 | linear |
-
-Full table: `python view_hpo.py --study attack-hpo-v5`.
-
-**GPT-2 vs GPT-Neo verdict (both under the corrected, token-weighted objective):**
-
-| Model | max_length | val_loss |
-|---|---|---|
-| GPT-2 (v5 best) | 512 | 2.3696 |
-| GPT-Neo (v2 best) | 512 | 2.2413 |
-| GPT-Neo (len-probe best) | 768 | 2.2203 |
-
-**GPT-Neo-125M outperforms GPT-2-base by ~5.4%** (vs GPT-2's 512 config) to **~6.3%** (vs
-GPT-Neo's 768 config) on held-out val loss. GPT-2's apparent earlier edge (1.1324 vs
-GPT-Neo's 1.5392 under `gpt-neo-hpo-v1`) was entirely a padding-bug artifact that affected
-GPT-2 less severely than GPT-Neo (whose 256-token local attention window made it especially
-sensitive to unmasked padding at `max_length=512`).
-
-### GPT-Neo 125M HPO (24 trials, converged — superseded, see bug note above)
-
-Study `gpt-neo-hpo-v1`. Objective: minimize held-out val loss.
-Best trial #13: val_loss=1.5392, lr=3.42e-05, batch_size=32, max_length=256, lr_schedule=cosine,
-weight_decay=0.0618, warmup_fraction=0.0887, max_grad_norm=0.30 (see config above).
-All 3 `max_length=512` trials diverged and were pruned by epoch 2 (val_loss 2.07-15.00) — see note above.
-Run `python view_hpo.py --study gpt-neo-hpo-v1` for the full trial table.
-
-**These results used a buggy objective** (unmasked padding in `labels`, see warning above) and are not
-comparable to post-fix results. Superseded by `gpt-neo-hpo-v2`.
-
-### GPT-Neo 125M HPO v2 (corrected objective, converged — 24 trials)
-
-Study `gpt-neo-hpo-v2`. Same search space as v1, but with the padding-mask fix applied to
-`EmailDataset.__getitem__` (`labels[attention_mask == 0] = -100`). Fresh study with no shared
-trial history. Converged after 24 trials (3 batches of 8): best val_loss improved 2.2507 →
-2.2413 (0.42%) in the final batch, second consecutive batch under the 1% threshold.
-
-**Best config (trial #20, val_loss = 2.2413, epoch 5):**
-
-| Hyperparameter | Value |
-|---|---|
-| learning_rate | 1.95e-05 |
-| batch_size | 32 |
-| max_length | **512** |
-| lr_schedule | cosine |
-| weight_decay | 0.0799 |
-| warmup_fraction | 0.0780 |
-| max_grad_norm | 0.49 |
-
-For `run_attacks.sbatch`: `LEARNING_RATE=1.95e-05 BATCH_SIZE=32 MAX_GRAD_NORM=0.49 MAX_LENGTH=512 USE_LORA=0` (cosine schedule).
-
-**Headline finding — v1's max_length=512 divergence was an artifact.** Under the corrected
-objective, the top 5 trials are ALL `max_length=512` (2.2413–2.2581), `max_length=128` trails
-at ≥2.356, and in batch 3 TPE sampled 512 for all 8 trials. The "divergence" (val loss 7–15)
-seen in v1 was entirely the padding-label bug inflating loss in proportion to padding. The
-viable lr band is ~1e-5–1e-4 (sweet spot ~2e-5); everything above ~1.8e-4 had rising val loss
-and was pruned. Caveat: top-trial val losses sit within ~0.7% of each other, so the exact
-winner among the leaders is somewhat seed-dependent; the robust conclusions are 512 ≫ 128 and
-the lr band. Attack rates (informational): 0.07–0.17% across completed trials.
-
-Full table: `python view_hpo.py --study gpt-neo-hpo-v2`. Next step: the long-context probe
-below (`gpt-neo-len-probe`) tests whether 768/1024 helps further.
-
-### GPT-Neo 125M long-context probe (gpt-neo-len-probe, complete — 8 trials)
-
-Follow-up to v2: under the corrected objective `max_length=512` leads, and ~22% of emails are
-still truncated at 512 tokens (~10% at 1024; median 198, mean 621 tokens, GPT-Neo tokenizer).
-This probe searched `max_length ∈ {768, 1024}` with a search space tightened from v2 evidence:
-lr capped at 1e-4, batch_size 2/4 dropped, weight_decay/warmup ceilings raised to 0.3/0.2, and
-conservative VRAM batch caps for 768 (bs≤16) and 1024 (bs≤8). Token-weighted
-`compute_val_loss` (env-configurable via `HPO_MAX_LENGTH_CHOICES`, `HPO_BATCH_SIZE_CHOICES`,
-`HPO_LR_MIN`/`HPO_LR_MAX`, `HPO_WD_MAX`, `HPO_WARMUP_MAX`) was applied. Synced to circe only
-after `gpt-neo-hpo-v2` fully converged, to keep v2's objective consistent across its batches.
-
-Results (8 trials, all completed or pruned cleanly):
-
-| Trial | max_length | lr | batch_size | schedule | val_loss | state |
-|-------|-----------|-----|-----------|----------|----------|-------|
-| 1 | 768 | 3.0e-05 | 16 | linear | **2.2203** | complete (best) |
-| 0 | 768 | 1.1e-05 | 16 | linear | 2.2222 | complete |
-| 4 | 768 | 3.63e-05 | 4 | cosine | 2.2261 | complete |
-| 2 | 1024 | 1.1e-05 | 16 | linear | 2.2278 | complete |
-| 6 | 768 | 2.26e-05 | 8 | cosine | 2.2322 | pruned |
-| 5 | 1024 | 6.36e-06 | 8 | linear | 2.2373 | pruned |
-| 3 | 1024 | 3.0e-05 | 16 | linear | 2.2476 | pruned |
-| 7 | 1024 | 6.43e-05 | 4 | linear | 2.4141 | pruned |
-
-Best (trial #1, `max_length=768`): val_loss=2.2203 vs v2's 512 baseline of 2.2413 — a 0.94%
-improvement. All three completed `max_length=768` trials (2.2203–2.2261) beat the completed
-`max_length=1024` trial (2.2278) and the 512 baseline; 1024 shows no further benefit and its
-other trials were pruned worse. However, 0.94% is comparable to the ~0.7% spread among v2's
-top-3 trials at 512 — i.e. within noise — and the comparison is confounded by different
-evaluation token sets per `max_length` and by v2's val_loss being batch-averaged vs this
-probe's token-weighted. **Verdict: no further HPO on `max_length` for GPT-Neo** — 512 and 768
-are statistically indistinguishable from this probe; defer the final 512-vs-768 call to the
-downstream attack-success metric rather than spending more compute on val-loss differences
-this small.
 
 ### GPT-Neo 125M Attack Results (full 50k run, `gpt-neo-hpo-v2` trial #20 config, job 33121395)
 
@@ -542,19 +351,30 @@ REAL_HOME=/home/i/ismailj   # replace ismailj with your NetID
 
 ```
 .
-├── main.py               # Full experiment pipeline (train once + attack loop)
-├── compare_results.py    # Ranked attack-type comparison table + CSV export
-├── hpo_trial.py          # BOHB HPO objective (one trial per SLURM job)
-├── view_hpo.py           # Inspect HPO results and print best params
-├── download_model.py     # Pre-download models on login node
-├── run_attacks.sbatch    # SLURM job: full attack experiment
-├── run_hpo.sbatch        # SLURM job: one HPO trial
-├── submit_hpo.sh         # Submit N parallel HPO jobs
-├── requirements.txt      # Python dependencies
-├── pyproject.toml        # Project metadata
-├── enron_data/           # Email corpus (not tracked)
+├── main.py                       # Full experiment pipeline (train once + attack loop)
+├── compare_results.py            # Ranked attack-type comparison table + CSV export
+├── hpo_trial.py                  # BOHB HPO objective (one trial per SLURM job)
+├── view_hpo.py                   # Inspect HPO results and print best params
+├── download_model.py             # Pre-download models on login node
+├── submit_hpo.sh                 # Submit N parallel HPO jobs
+├── requirements.txt              # Python dependencies
+├── pyproject.toml                # Project metadata
+├── CODE_EXPLANATION.md           # Code walkthrough / data-flow reference
+├── slurm/
+│   ├── run_attacks.sbatch        # SLURM job: full attack experiment (GPT-Neo 125M)
+│   ├── run_hpo.sbatch            # SLURM job: one HPO trial (GPT-2)
+│   ├── run_hpo_gptneo.sbatch     # SLURM job: one HPO trial (GPT-Neo 125M)
+│   ├── run_hpo_gptneo_probe.sbatch  # SLURM job: GPT-Neo long-context HPO probe
+│   ├── run.sbatch                # SLURM job: GPT-2-Large + DP-SGD (dpfe-large)
+│   └── run_gpt2.sbatch           # SLURM job: GPT-2-base + DP-SGD (dpfe-base)
+├── hpo/
+│   ├── enqueue_gpt2_v5_seed.py   # Seed attack-hpo-v5 with v4's winning trial
+│   └── enqueue_len_probe.py      # Seed gpt-neo-len-probe with v2's winning trial
+├── docs/
+│   └── HPO_RESULTS.md            # Full chronological HPO sweep history
+├── enron_data/                   # Email corpus (not tracked)
 └── results/
-    └── gpt2-base-attacks/
+    └── gpt-neo-125m-attacks/
         ├── results.json              # Per-attack-type results
         ├── model_checkpoint/         # Saved fine-tuned model
         └── predictions/
