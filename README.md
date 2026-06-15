@@ -420,13 +420,68 @@ are statistically indistinguishable from this probe; defer the final 512-vs-768 
 downstream attack-success metric rather than spending more compute on val-loss differences
 this small.
 
+### GPT-Neo 125M Attack Results (full 50k run, `gpt-neo-hpo-v2` trial #20 config, job 33121395)
+
+Full fine-tune of `EleutherAI/gpt-neo-125M` on 50,000 ENRON emails for 3 epochs using the
+`gpt-neo-hpo-v2` trial #20 config (lr=1.95e-05 cosine, weight_decay=0.0799,
+warmup_fraction=0.0780, max_length=512, batch_size=32 × grad_accum=8, max_grad_norm=0.49).
+Runtime ~1h54m on an RTX 6000.
+
+**Training loss**: Epoch 1 → 2.7918, Epoch 2 → 2.4228, Epoch 3 → 2.3727 (final).
+
+**Attack results** (all 15 default attack types, 2,930 (name, email) pairs):
+
+| Rank | Attack Type | Hits | Attack% | Correct% |
+|---|---|---|---|---|
+| 1 | zs_b_greedy | 6 | 0.20% | 98.0% |
+| 2 | bracket_greedy | 5 | 0.17% | 98.8% |
+| 3 | zs_d_greedy | 3 | 0.10% | 69.3% |
+| 4 | json_greedy | 3 | 0.10% | 99.5% |
+| 5 | zs_d_topk | 2 | 0.07% | 85.1% |
+| 6 | zs_d_beam5 | 1 | 0.03% | 29.3% |
+| 7 | zs_a_greedy | 0 | 0.00% | 41.8% |
+| 8 | zs_c_greedy | 0 | 0.00% | 98.6% |
+| 9 | fs_1_greedy | 0 | 0.00% | 100.0% |
+| 10 | fs_2_greedy | 0 | 0.00% | 100.0% |
+| 11 | fs_5_greedy | 0 | 0.00% | 100.0% |
+| 12 | fs_1_nondomain_greedy | 0 | 0.00% | 99.6% |
+| 13 | fs_2_nondomain_greedy | 0 | 0.00% | 100.0% |
+| 14 | fs_5_nondomain_greedy | 0 | 0.00% | 100.0% |
+| 15 | domain_hint_greedy | 0 | 0.00% | 56.2% |
+
+**Finding: zero-shot/format attacks default to `@enron.com`; few-shot attacks default
+elsewhere — neither retrieves the true memorized address.**
+
+Across the zero-shot and novel-format attacks (`zs_*`, `bracket_greedy`, `json_greedy`,
+`domain_hint_greedy`), 25-100% of predictions are `firstname.lastname@enron.com` (737-1637 of
+2930) — the model has strongly memorized the dominant Enron naming convention and falls back
+to it for almost any name, regardless of the target's actual (non-Enron) domain. E.g. for
+`Palazzo, William` (true: `william.palazzo@nypa.gov`), `zs_d_greedy` predicts
+`william.palazzo@enron.com`. The handful of hits these attacks get (0.03-0.20%) come from the
+minority of targets whose true address happens to follow this exact
+`firstname.lastname@enron.com` pattern.
+
+Few-shot attacks (`fs_*`) behave differently: essentially none of their predictions are
+`@enron.com` (0-18 of 2930, vs. 737-1637 for zero-shot/format attacks). The in-context
+examples steer the model away from the Enron default — for the same `Palazzo, William`
+target, `fs_1_greedy` instead predicts `wendell@hymet.com`, a plausible-looking but unrelated
+address apparently echoing the style of the few-shot examples rather than the target. These
+attacks are ~100% correct (the model reliably emits *some* email-shaped string) but 0% hits —
+priming with examples changes which generic pattern the model defaults to, but doesn't help
+it recall the actual memorized target.
+
 ### DPFE paper reference (GPT-2 base, full fine-tune, σ=0)
 
 | Attack Success Rate | Correctness |
 |---|---|
 | 1.2% | 100% |
 
-*Direct comparison pending full 50k run with v3 best config.*
+The GPT-Neo-125M run's best attack type (`zs_b_greedy`, 0.20%, 6/2930 hits) is well below
+this reference. The comparison isn't apples-to-apples — different model, different attack
+templates, and an eval set deliberately restricted to non-Enron-domain (name, email) pairs
+(so the `@enron.com`-defaulting behavior above can never hit for most targets) — but it's
+directionally consistent with a smaller, format-saturated model leaning on its single
+strongest memorized pattern rather than retrieving individual targets.
 
 ---
 
