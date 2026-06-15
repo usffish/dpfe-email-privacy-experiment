@@ -98,7 +98,7 @@ def main():
     if train_losses:
         print(f"  Train losses: {[f'{l:.4f}' for l in train_losses]}")
 
-    print(f"\nTo use best params in run_attacks.sbatch:  (val_loss={best.value:.4f})")
+    print(f"\nTo use best params in slurm/run_attacks.sbatch:  (val_loss={best.value:.4f})")
     lr            = best.params.get("learning_rate")
     batch_size    = best.params.get("batch_size")
     max_grad_norm = best.params.get("max_grad_norm")

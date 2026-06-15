@@ -7,10 +7,10 @@ measures the real (padding-masked, token-weighted) val loss of the v4
 winner, telling us whether GPT-2's apparent advantage over GPT-Neo
 (1.1324 vs 2.2413) survives the objective fix.
 
-Usage (on circe):
-    python enqueue_gpt2_v5_seed.py
-    bash submit_hpo.sh 1 attack-hpo-v5 run_hpo.sbatch   # quick check
-    bash submit_hpo.sh 8 attack-hpo-v5 run_hpo.sbatch   # then the sweep
+Usage (on circe, from repo root):
+    python hpo/enqueue_gpt2_v5_seed.py
+    bash submit_hpo.sh 1 attack-hpo-v5 slurm/run_hpo.sbatch   # quick check
+    bash submit_hpo.sh 8 attack-hpo-v5 slurm/run_hpo.sbatch   # then the sweep
 """
 
 import optuna

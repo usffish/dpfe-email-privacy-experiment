@@ -264,7 +264,7 @@ cosine) brings it back down — this stabilizes early training and avoids oversh
 
 ### load_checkpoint()
 
-If `results/<output_dir>/model_checkpoint/` already exists from a previous run, the model is loaded from disk instead of retrained. This lets a 36-hour `run_attacks.sbatch` job be re-submitted after hitting the SLURM time limit and pick up at the attack phase instead of retraining from scratch.
+If `results/<output_dir>/model_checkpoint/` already exists from a previous run, the model is loaded from disk instead of retrained. This lets a 36-hour `slurm/run_attacks.sbatch` job be re-submitted after hitting the SLURM time limit and pick up at the attack phase instead of retraining from scratch.
 
 ---
 
@@ -414,12 +414,12 @@ should be.
 
 ### Related scripts
 
-- **`enqueue_len_probe.py`** — seeds `gpt-neo-len-probe` with 4 trials crossing
+- **`hpo/enqueue_len_probe.py`** — seeds `gpt-neo-len-probe` with 4 trials crossing
   `max_length ∈ {768,1024}` × `learning_rate ∈ {1.1e-5, 3e-5}`, holding the other
   hyperparameters at `gpt-neo-hpo-v2`'s winning trial's values.
-- **`enqueue_gpt2_v5_seed.py`** — seeds `attack-hpo-v5` with `attack-hpo-v4`'s winning
+- **`hpo/enqueue_gpt2_v5_seed.py`** — seeds `attack-hpo-v5` with `attack-hpo-v4`'s winning
   config as trial #0, the "quick check" that re-measures it under the corrected objective.
-- **`run_hpo_gptneo_probe.sbatch`** — sbatch wrapper for the length-probe study; sets
+- **`slurm/run_hpo_gptneo_probe.sbatch`** — sbatch wrapper for the length-probe study; sets
   `HPO_MAX_LENGTH_CHOICES=768,1024`, `HPO_BATCH_SIZE_CHOICES=8,16,32`, `HPO_LR_MAX=1e-4`,
   `HPO_WD_MAX=0.3`, `HPO_WARMUP_MAX=0.2`.
 

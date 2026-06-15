@@ -8,9 +8,9 @@ Creates the study if it doesn't exist, so this is safe to run before the
 first probe job. batch_size=16 is clamped to 8 at max_length=1024 by
 hpo_trial.py's max_safe table.
 
-Usage (on circe):
-    python enqueue_len_probe.py
-    bash submit_hpo.sh 8 gpt-neo-len-probe run_hpo_gptneo_probe.sbatch
+Usage (on circe, from repo root):
+    python hpo/enqueue_len_probe.py
+    bash submit_hpo.sh 8 gpt-neo-len-probe slurm/run_hpo_gptneo_probe.sbatch
 """
 
 import optuna

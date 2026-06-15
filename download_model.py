@@ -1,5 +1,5 @@
 """
-Run this script on a CIRCE login node BEFORE submitting run.sbatch or run_gpt2.sbatch.
+Run this script on a CIRCE login node BEFORE submitting slurm/run.sbatch or slurm/run_gpt2.sbatch.
 It pre-downloads both model variants into $HF_HOME so compute nodes can load them
 offline (TRANSFORMERS_OFFLINE=1).
 
@@ -31,4 +31,4 @@ for model_id, size in MODELS:
     AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.float32)
     print(f"  {model_id} done.\n")
 
-print("Both models downloaded. You can now submit run.sbatch and run_gpt2.sbatch.")
+print("Both models downloaded. You can now submit slurm/run.sbatch and slurm/run_gpt2.sbatch.")

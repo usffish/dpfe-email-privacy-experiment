@@ -6,11 +6,11 @@
 #   bash submit_hpo.sh                              # 8 jobs, gpt2 (default)
 #   bash submit_hpo.sh 16                           # 16 jobs, gpt2
 #   bash submit_hpo.sh 8 attack-hpo-v4              # custom study name, gpt2
-#   bash submit_hpo.sh 8 gpt-neo-hpo-v1 run_hpo_gptneo.sbatch  # gpt-neo
+#   bash submit_hpo.sh 8 gpt-neo-hpo-v1 slurm/run_hpo_gptneo.sbatch  # gpt-neo
 
 N=${1:-8}
 STUDY=${2:-"attack-hpo-v5"}
-SBATCH_FILE=${3:-"run_hpo.sbatch"}
+SBATCH_FILE=${3:-"slurm/run_hpo.sbatch"}
 
 echo "Submitting $N HPO jobs (study: $STUDY, sbatch: $SBATCH_FILE)"
 
