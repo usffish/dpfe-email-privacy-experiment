@@ -2,7 +2,7 @@
 
 Extends the DPFE paper's email privacy case study to compare **15 distinct attack strategies** against the same fine-tuned model. Instead of varying DP noise levels, this branch fixes noise at σ=0 and asks: *which extraction method is most effective?*
 
-Designed to run on the USF CIRCE cluster's `muma_2021` partition (RTX A6000, 48 GB VRAM) with a full fine-tuned GPT-2 base (117M), and to scale to GPT-Neo 125M with no code changes.
+Designed to run on the USF CIRCE cluster's `muma_2021` partition (RTX A6000, 48 GB VRAM). Supports a full fine-tuned GPT-2 base (117M) or GPT-Neo 125M with no code changes — HPO determined GPT-Neo 125M generalizes better (see Hyperparameter Tuning), so it was used for the final attack run.
 
 ---
 
@@ -10,7 +10,7 @@ Designed to run on the USF CIRCE cluster's `muma_2021` partition (RTX A6000, 48 
 
 The main experiment has two phases:
 
-1. **Train once** — full fine-tune GPT-2 base on 50,000 ENRON emails (no DP noise). Hyperparameters selected via BOHB sweep (see below).
+1. **Train once** — full fine-tune (GPT-Neo 125M for the final results below; GPT-2 base also supported) on 50,000 ENRON emails (no DP noise). Hyperparameters selected via BOHB sweep (see below).
 2. **Attack 15 ways** — run each attack strategy against the fine-tuned model, rank by success rate.
 
 This inverts the circe branch experiment (which varies σ across a single attack type) and answers a different research question: given a memorizing model, which prompting or decoding strategy extracts the most private information?
