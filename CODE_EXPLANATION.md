@@ -377,6 +377,47 @@ For each attack type, results are appended to `results.json` and the file is rew
 
 Multiple SLURM jobs write to the same study via `JournalFileBackend` — an append-only file format that's safe on CIRCE's NFS-mounted home directories (unlike SQLite, whose file locking breaks on NFS). See `view_hpo.py` for inspecting results and the README's "Hyperparameter Tuning" section for current best configs.
 
+### Env-configurable search space
+
+The `HPO` config dict's search-space bounds are overridable via environment variables, all
+defaulting to the original v1-v4 ranges so existing studies are unaffected:
+
+| Env var | Default | Controls |
+|---|---|---|
+| `HPO_MAX_LENGTH_CHOICES` | `128,256,512` | `max_length` categorical choices |
+| `HPO_BATCH_SIZE_CHOICES` | `2,4,8,16,32` | `batch_size` categorical choices |
+| `HPO_LR_MIN` / `HPO_LR_MAX` | `5e-6` / `5e-4` | `learning_rate` log-uniform range |
+| `HPO_WD_MAX` | `0.1` | `weight_decay` upper bound (uniform from 0) |
+| `HPO_WARMUP_MAX` | `0.1` | `warmup_fraction` upper bound (uniform from 0) |
+
+This is how `gpt-neo-len-probe` searches `max_length ∈ {768, 1024}` and `attack-hpo-v5`
+widens the `weight_decay`/`warmup_fraction` ceilings without touching the v1-v4 studies'
+search spaces — Optuna forbids changing a distribution mid-study, so each variant needs its
+own study name. `max_safe` (VRAM batch-size caps for `compute_val_loss`/training) was
+extended to cover `max_length` 768 (≤16) and 1024 (≤8) — conservative extrapolations from
+the measured 128/256/512 caps, not individually OOM-swept.
+
+### Token-weighted validation loss
+
+`compute_val_loss` accumulates `loss * n_targets` (count of non-masked label positions)
+across all validation batches and divides by the total token count, instead of averaging
+per-batch losses. HF's per-batch loss is already a mean over that batch's non-masked
+targets, so a plain average-of-batch-means over-weights tokens in sparsely-filled batches —
+and the bias varies with `batch_size`, which made cross-trial comparisons (different batch
+sizes) and cross-`max_length` comparisons (different padding ratios) noisier than they
+should be.
+
+### Related scripts
+
+- **`enqueue_len_probe.py`** — seeds `gpt-neo-len-probe` with 4 trials crossing
+  `max_length ∈ {768,1024}` × `learning_rate ∈ {1.1e-5, 3e-5}`, holding the other
+  hyperparameters at `gpt-neo-hpo-v2`'s winning trial's values.
+- **`enqueue_gpt2_v5_seed.py`** — seeds `attack-hpo-v5` with `attack-hpo-v4`'s winning
+  config as trial #0, the "quick check" that re-measures it under the corrected objective.
+- **`run_hpo_gptneo_probe.sbatch`** — sbatch wrapper for the length-probe study; sets
+  `HPO_MAX_LENGTH_CHOICES=768,1024`, `HPO_BATCH_SIZE_CHOICES=8,16,32`, `HPO_LR_MAX=1e-4`,
+  `HPO_WD_MAX=0.3`, `HPO_WARMUP_MAX=0.2`.
+
 ---
 
 ## Common Questions Your Professor Might Ask

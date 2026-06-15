@@ -124,6 +124,10 @@ Study `attack-hpo-v4` (11 complete, 13 pruned). Best trial **#13**, val_loss=1.1
 
 These values are now applied as the defaults in `run_attacks.sbatch`. Run `python view_hpo.py --study attack-hpo-v4` for the full trial table and parameter-importance breakdown.
 
+**Re-confirmed under the corrected objective by `attack-hpo-v5`** (see Results below) — this
+exact config remains optimal (val_loss=2.3696 corrected vs the 1.1324 shown above, which was
+a padding-bug artifact); no default changes needed.
+
 ### Best config (GPT-Neo 125M HPO results)
 
 Study `gpt-neo-hpo-v1` (24 trials: 8 complete, 16 pruned, converged). Best trial **#13**, val_loss=1.5392 (epoch 4):
@@ -293,6 +297,49 @@ Study `attack-hpo-v4`. Objective: minimize held-out val loss (attack-type-agnost
 Best trial #13: val_loss=1.1324, lr=9.82e-05, batch_size=16, max_length=512, lr_schedule=linear,
 weight_decay=0.0637, warmup_fraction=0.097, max_grad_norm=4.63 (see config above).
 Run `python view_hpo.py --study attack-hpo-v4` for the full trial table.
+
+### GPT-2 HPO v5 (corrected objective, converged — 17 trials)
+
+Study `attack-hpo-v5`. Same padding-mask + token-weighted val-loss fix as `gpt-neo-hpo-v2`,
+plus the widened search space (`weight_decay` up to 0.3, `warmup_fraction` up to 0.2 — both
+baked into `run_hpo.sbatch` via `HPO_WD_MAX`/`HPO_WARMUP_MAX`, identical across all v5 jobs).
+
+**Quick check (trial #0)**: re-ran v4's best config (lr=9.82e-05, batch_size=16,
+max_length=512, linear, weight_decay=0.0637, warmup_fraction=0.097, max_grad_norm=4.63) under
+the corrected objective: **val_loss=2.3696** (epoch 5, monotone 2.4607→2.3696), vs the old
+buggy value of 1.1324. The old number was an artifact — at `max_length=512`, GPT-2's
+unmasked padding/eos positions were scored as trivially easy, deflating the batch-averaged
+loss.
+
+Converged after 17 trials (1 seed + 2 batches of 8; 5 complete, 11 pruned, 1 failed with
+CUDA OOM at batch_size=32/max_length=512 — a one-off, not a search-space issue). Two
+consecutive batches found **no trial beating the seed's 2.3696** (counter hit 2/2).
+**GPT-2's optimal hyperparameters did not shift** from v4 despite exploring the widened
+wd/warmup ranges and the full lr range — trial #0 (= v4's winner) remains the best.
+
+| Rank | Trial | val_loss | max_length | lr | batch_size | schedule |
+|---|---|---|---|---|---|---|
+| 1 | 0 | **2.3696** | 512 | 9.82e-05 | 16 | linear |
+| 2 | 2 | 2.4213 | 256 | 7.93e-05 | 2 | cosine |
+| 3 | 13 | 2.4292 | 256 | 4.42e-05 | 2 | linear |
+| 4 | 4 | 2.4989 | 256 | 1.23e-05 | 8 | cosine |
+| 5 | 9 | 2.5158 | 256 | 1.01e-05 | 8 | linear |
+
+Full table: `python view_hpo.py --study attack-hpo-v5`.
+
+**GPT-2 vs GPT-Neo verdict (both under the corrected, token-weighted objective):**
+
+| Model | max_length | val_loss |
+|---|---|---|
+| GPT-2 (v5 best) | 512 | 2.3696 |
+| GPT-Neo (v2 best) | 512 | 2.2413 |
+| GPT-Neo (len-probe best) | 768 | 2.2203 |
+
+**GPT-Neo-125M outperforms GPT-2-base by ~5.4%** (vs GPT-2's 512 config) to **~6.3%** (vs
+GPT-Neo's 768 config) on held-out val loss. GPT-2's apparent earlier edge (1.1324 vs
+GPT-Neo's 1.5392 under `gpt-neo-hpo-v1`) was entirely a padding-bug artifact that affected
+GPT-2 less severely than GPT-Neo (whose 256-token local attention window made it especially
+sensitive to unmasked padding at `max_length=512`).
 
 ### GPT-Neo 125M HPO (24 trials, converged — superseded, see bug note above)
 
