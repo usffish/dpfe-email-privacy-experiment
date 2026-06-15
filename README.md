@@ -54,15 +54,16 @@ Include explicitly with `ATTACK_TYPES=context_50,context_100,context_200`.
 
 ## Differences from `circe` Branch
 
-| Aspect | `circe` branch | `attack` branch |
-|---|---|---|
-| Fine-tuning | LoRA (r=64, ~11.8M params) | **Full fine-tuning** (125M params) |
-| DP noise | 5 levels (σ = 0–0.005) | **None** (σ=0 only) |
-| Attack strategies | 1 (Carlini Enron, greedy) | **15** |
-| Hyperparameter tuning | Heuristic (LR ∝ 1/r) | **BOHB sweep** (minimize val loss) |
-| Evaluation metric | Attack rate across noise levels | Attack rate across attack types |
-| Sequence length | 128 tokens | **512 tokens** (HPO finding) |
-| Results format | Table 11 replication | Ranked attack comparison |
+| Aspect | `circe` branch | `attack` branch (default mode) | `attack` branch (`DP_NOISE_LEVELS` set) |
+|---|---|---|---|
+| Fine-tuning | QLoRA (4-bit + LoRA, ~few M params) | **Full fine-tuning** (125M params) | **Full fine-tuning** (125M params) |
+| Model | GPT-Neo 1.3B | GPT-Neo 125M | GPT-Neo 125M |
+| DP noise | 5 levels (σ = 0–0.005), LoRA adapters only | **None** (σ=0 only) | 5 levels (σ = 0–0.005), **all** trainable gradients |
+| Attack strategies | 1 (Carlini Enron, greedy) | **15** | 1 (`DP_ATTACK_TYPE`, default `zs_d_greedy`) |
+| Hyperparameter tuning | Heuristic (LR ∝ 1/r) | **BOHB sweep** (minimize val loss) | BOHB config (`gpt-neo-hpo-v2`) |
+| Evaluation metric | Attack rate across noise levels | Attack rate across attack types | Attack rate across noise levels |
+| Sequence length | 128 tokens | **512 tokens** (HPO finding) | 512 tokens |
+| Results format | Table 11 replication | Ranked attack comparison | Table 11 replication (`table_11_results.json`) |
 
 ---
 
@@ -170,6 +171,24 @@ bash submit_hpo.sh 8 gpt-neo-hpo-v2 slurm/run_hpo_gptneo.sbatch
 ```
 
 Each SLURM job runs one trial: trains on 9k emails (10% held out as val set), computes val loss per epoch for HyperBand pruning, then runs `zs_d_greedy` attack on 3,238 pairs as an informational check. HyperBand prunes bad configs after epoch 1 (~20 min). Surviving configs run to epoch 3 (~40–60 min total).
+
+### Run the DP-SGD noise sweep (Table 11 replication)
+
+```bash
+sbatch slurm/run_noise_sweep.sbatch
+```
+
+The `circe`-branch equivalent — DP-SGD across 5 noise levels (σ = 0, 0.0001, 0.0005, 0.002,
+0.005) — but **full fine-tuning + GPT-Neo-125M** instead of QLoRA + GPT-Neo-1.3B. Since
+there's no LoRA adapter to isolate, DP-SGD noise (clip + Gaussian) is applied to *all*
+trainable gradients. Trains one fresh full fine-tune per σ (`gpt-neo-hpo-v2` config, 3
+epochs), runs `zs_d_greedy` (the Carlini/DPFE template) against each, and reports attack
+rate / privacy enhancement / correctness vs. σ — `results/<output_dir>/table_11_results.json`.
+Checkpoint/resume — restarting skips completed σ levels (each has its own
+`model_checkpoint_sigma_<σ>/`).
+
+Controlled by `DP_NOISE_LEVELS` (comma-separated σ values; unset = normal multi-attack-type
+mode) and `DP_ATTACK_TYPE` (default `zs_d_greedy`).
 
 ### Configuration
 
@@ -346,6 +365,7 @@ REAL_HOME=/home/i/ismailj   # replace ismailj with your NetID
 ├── CODE_EXPLANATION.md           # Code walkthrough / data-flow reference
 ├── slurm/
 │   ├── run_attacks.sbatch        # SLURM job: full attack experiment (GPT-Neo 125M)
+│   ├── run_noise_sweep.sbatch    # SLURM job: DP-SGD noise sweep, Table 11 (GPT-Neo 125M, full FT)
 │   ├── run_hpo_gptneo.sbatch     # SLURM job: one HPO trial (GPT-Neo 125M)
 │   └── run_hpo_gptneo_probe.sbatch  # SLURM job: GPT-Neo long-context HPO probe
 ├── hpo/

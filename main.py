@@ -37,6 +37,15 @@ Future-proofing
 ---------------
 - USE_LORA=0 env var skips LoRA and uses full fine-tuning (for A6000/L40S)
 - MODEL_NAME=EleutherAI/gpt-neo-125M or gpt-neo-1.3B works without code changes
+
+DP-SGD noise sweep (Table 11 replication, `circe` branch equivalent)
+----------------------------------------------------------------------
+- DP_NOISE_LEVELS="0,0.0001,0.0005,0.002,0.005" switches to noise-sweep mode:
+  trains one full fine-tune per noise level (DP-SGD: clip + Gaussian noise on
+  ALL trainable gradients, since there's no LoRA adapter to isolate), runs
+  DP_ATTACK_TYPE (default zs_d_greedy) against each, and reports attack rate /
+  privacy enhancement / correctness per σ — same structure as `circe`'s Table
+  11 but full fine-tuning + GPT-Neo instead of QLoRA + GPT-Neo-1.3B.
 """
 
 import os as _os
@@ -66,6 +75,7 @@ from transformers import (
     get_linear_schedule_with_warmup,
 )
 from peft import LoraConfig, get_peft_model, PeftModel, TaskType
+from opacus.accountants import RDPAccountant
 from tabulate import tabulate
 import email
 from email.utils import parseaddr
@@ -151,7 +161,16 @@ CONFIG = {
     "lora_alpha":           int(os.getenv("LORA_ALPHA", 32)),
     "lora_dropout":         float(os.getenv("LORA_DROPOUT", 0.05)),
     "lora_target_modules":  ["c_attn"],
+    # DP-SGD noise sweep (Table 11 replication) — empty by default (normal mode)
+    "dp_noise_levels":      [float(x) for x in os.getenv("DP_NOISE_LEVELS", "").split(",") if x.strip()],
+    "dp_attack_type":       os.getenv("DP_ATTACK_TYPE", "zs_d_greedy"),
 }
+
+if CONFIG["dp_noise_levels"] and CONFIG["dp_attack_type"] not in ATTACK_CONFIGS:
+    raise ValueError(
+        f"Unknown DP_ATTACK_TYPE: {CONFIG['dp_attack_type']!r}\n"
+        f"Valid types: {sorted(ATTACK_CONFIGS)}"
+    )
 
 if os.getenv("SMOKE", "0") == "1":
     CONFIG.update({
@@ -413,12 +432,42 @@ class LoRADPTrainer:
 
         return model
 
-    def train(self, train_texts, epochs=3, batch_size=16):
+    def _apply_dp_noise(self, model, noise_multiplier):
+        """Clip gradients and (if noise_multiplier > 0) add Gaussian noise to
+        every trainable gradient — DP-SGD step. With noise_multiplier=0 this
+        is equivalent to plain gradient clipping (the no-DP path)."""
+        trainable = [p for p in model.parameters() if p.requires_grad and p.grad is not None]
+        torch.nn.utils.clip_grad_norm_(trainable, CONFIG["max_grad_norm"])
+        if noise_multiplier > 0:
+            for param in trainable:
+                noise = torch.normal(
+                    mean=0.0,
+                    std=noise_multiplier * CONFIG["max_grad_norm"],
+                    size=param.grad.shape,
+                    device=param.grad.device,
+                    dtype=param.grad.dtype,
+                )
+                param.grad.add_(noise)
+
+    def _compute_epsilon(self, steps, noise_multiplier, sample_rate, delta=1e-5):
+        """RDP-accountant privacy budget for `steps` DP-SGD optimizer steps."""
+        if noise_multiplier == 0:
+            return float("inf")
+        accountant = RDPAccountant()
+        for _ in range(steps):
+            accountant.step(noise_multiplier=noise_multiplier, sample_rate=sample_rate)
+        return accountant.get_epsilon(delta=delta)
+
+    def train(self, train_texts, epochs=3, batch_size=16, noise_multiplier=0.0):
         accum_steps = CONFIG["grad_accum_steps"]
         effective_batch = batch_size * accum_steps
+        sample_rate = effective_batch / len(train_texts)
 
         print(f"\n{'='*60}")
-        print(f"Training (no DP noise)")
+        if noise_multiplier > 0:
+            print(f"Training with DP-SGD noise σ = {noise_multiplier}")
+        else:
+            print(f"Training (no DP noise)")
         print(f"Mode: {'LoRA' if CONFIG['use_lora'] else 'Full fine-tuning'} (float32)")
         print(f"Batch size: {batch_size} × {accum_steps} accum = {effective_batch} effective")
         print(f"{'='*60}")
@@ -448,6 +497,7 @@ class LoRADPTrainer:
                 optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps
             )
 
+        step = 0
         for epoch in range(epochs):
             total_loss = 0.0
             num_batches = 0
@@ -466,13 +516,11 @@ class LoRADPTrainer:
                     (batch_idx + 1) % accum_steps == 0 or (batch_idx + 1) == n_batches
                 )
                 if is_update_step:
-                    torch.nn.utils.clip_grad_norm_(
-                        filter(lambda p: p.requires_grad, model.parameters()),
-                        CONFIG["max_grad_norm"],
-                    )
+                    self._apply_dp_noise(model, noise_multiplier)
                     optimizer.step()
                     scheduler.step()
                     optimizer.zero_grad()
+                    step += 1
 
                 total_loss += outputs.loss.item()
                 num_batches += 1
@@ -483,6 +531,10 @@ class LoRADPTrainer:
                           f"({pct:5.1f}%) — loss: {total_loss / num_batches:.4f}", flush=True)
 
             print(f"  Epoch {epoch+1}/{epochs} — Avg Loss: {total_loss / max(num_batches, 1):.4f}")
+
+            if noise_multiplier > 0:
+                epsilon = self._compute_epsilon(step, noise_multiplier, sample_rate)
+                print(f"  Privacy budget: ε = {epsilon:.4f}, δ = 1e-5 (step={step})", flush=True)
 
         model.eval()
         return model
@@ -918,5 +970,153 @@ def print_results_table(results, attack_pairs):
     print(f"Attack pairs: {len(attack_pairs):,} (name, email) pairs")
 
 
+# ============================================================
+# Alternate Experiment — DP-SGD Noise Sweep (Table 11 replication)
+#
+# `circe`-branch equivalent: trains one full fine-tune per noise
+# level σ (DP-SGD: clip + Gaussian noise on ALL trainable gradients,
+# since there's no LoRA adapter to isolate), runs DP_ATTACK_TYPE
+# against each, and reports attack rate / privacy enhancement /
+# correctness — same Table 11 structure, full fine-tune + GPT-Neo.
+# ============================================================
+def run_noise_sweep_experiment():
+    set_seed(CONFIG["seed"])
+
+    if os.getenv("FRESH", "0") == "1":
+        import shutil
+        if os.path.exists(CONFIG["output_dir"]):
+            shutil.rmtree(CONFIG["output_dir"])
+            print(f"{ts()} FRESH=1: wiped {CONFIG['output_dir']}", flush=True)
+
+    os.makedirs(CONFIG["output_dir"], exist_ok=True)
+
+    print("=" * 60)
+    print("DP-SGD Noise Sweep — Table 11 Replication")
+    print(f"Model:  {CONFIG['model_name']} — "
+          f"{'LoRA' if CONFIG['use_lora'] else 'Full fine-tuning'} (float32)")
+    print(f"Noise levels (σ): {CONFIG['dp_noise_levels']}")
+    print(f"Attack type: {CONFIG['dp_attack_type']}")
+    print(f"Device: {CONFIG['device']}")
+    print("=" * 60)
+
+    results_path = os.path.join(CONFIG["output_dir"], "table_11_results.json")
+    results = []
+    completed = {}
+    if os.path.exists(results_path):
+        with open(results_path) as f:
+            results = json.load(f)
+        completed = {r["noise"]: r for r in results}
+        print(f"\nResuming: {len(completed)} noise level(s) already complete: {sorted(completed)}")
+
+    print("\n[Step 1] Loading and processing ENRON email data...")
+    processor = EnronDataProcessor(CONFIG["data_dir"])
+    processor.load_or_create_synthetic_data()
+
+    train_texts = processor.email_bodies[:CONFIG["max_emails"]]
+    attack_pairs = processor.name_email_pairs[:CONFIG["subset_pairs"]]
+    print(f"  Training emails: {len(train_texts)}")
+    print(f"  Attack pairs:    {len(attack_pairs)}")
+
+    print("\n[Step 2] Building attack support structures...")
+    attack_emails = {email_addr.lower() for _, email_addr in attack_pairs}
+    email_freq = build_email_freq(train_texts, attack_emails)
+
+    trainer = LoRADPTrainer(CONFIG["model_name"], CONFIG["device"])
+    attacker = PrivacyAttack(trainer.tokenizer, CONFIG["device"])
+
+    baseline_rate = completed.get(0.0, {}).get("attack_success_rate")
+
+    for noise in CONFIG["dp_noise_levels"]:
+        print(f"\n{ts()} === σ = {noise} ===")
+
+        if noise in completed:
+            print("  Skipping (already complete)")
+            continue
+
+        checkpoint_dir = os.path.join(CONFIG["output_dir"], f"model_checkpoint_sigma_{noise}")
+        if os.path.exists(checkpoint_dir):
+            model = trainer.load_checkpoint(checkpoint_dir)
+        else:
+            model = trainer.train(
+                train_texts,
+                epochs=CONFIG["epochs"],
+                batch_size=CONFIG["batch_size"],
+                noise_multiplier=noise,
+            )
+            os.makedirs(checkpoint_dir, exist_ok=True)
+            model.save_pretrained(checkpoint_dir)
+            print(f"  Checkpoint saved → {checkpoint_dir}")
+
+        predictions_path = os.path.join(CONFIG["output_dir"], "predictions", f"sigma_{noise}.json")
+        attack_rate, correctness, num_hits = attacker.run_attack(
+            model, attack_pairs, CONFIG["dp_attack_type"],
+            predictions_path=predictions_path,
+            email_freq=email_freq,
+        )
+
+        if baseline_rate is None:
+            baseline_rate = attack_rate
+        privacy_enhancement = (1 - attack_rate / baseline_rate) * 100 if baseline_rate > 0 else 0.0
+
+        results.append({
+            "noise": noise,
+            "attack_success_rate": attack_rate,
+            "privacy_enhancement": privacy_enhancement,
+            "correctness": correctness,
+            "num_hits": num_hits,
+        })
+        results.sort(key=lambda r: r["noise"])
+
+        with open(results_path, "w") as f:
+            json.dump(results, f, indent=2)
+        print(f"  Results checkpoint → {results_path}")
+        print(f"  Attack success: {attack_rate:.2f}% ({num_hits} hits)")
+        print(f"  Privacy enhancement: {privacy_enhancement:.0f}%")
+        print(f"  Correctness:    {correctness:.1f}%")
+
+        completed[noise] = results[-1]
+
+        del model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
+
+    print_table11_results(results, attack_pairs)
+    print(f"\nResults saved to {results_path}")
+
+
+def print_table11_results(results, attack_pairs):
+    """Print Table 11-style noise-vs-attack-rate comparison."""
+    print("\n")
+    print("=" * 80)
+    print("Table 11. Attack Success Rate vs. DP-SGD Noise Level (σ)")
+    print(f"Model: {CONFIG['model_name']} | Full fine-tuning | "
+          f"Attack: {CONFIG['dp_attack_type']} | {len(attack_pairs)} attack pairs")
+    print("=" * 80)
+
+    headers = ["Noise (σ)", "Attack Success Rate", "Privacy Enhancement", "Correctness (%)", "Hits"]
+    table_data = [
+        [
+            str(r["noise"]),
+            f"{r['attack_success_rate']:.2f}%",
+            f"{r['privacy_enhancement']:.0f}%",
+            f"{r['correctness']:.2f}",
+            r["num_hits"],
+        ]
+        for r in sorted(results, key=lambda r: r["noise"])
+    ]
+    print(tabulate(table_data, headers=headers, tablefmt="grid", stralign="center"))
+    print()
+    print(f"Model: {CONFIG['model_name']} (full fine-tuning, no LoRA)")
+    print(f"Dataset: ENRON Email Corpus ({CONFIG['max_emails']:,} emails)")
+    print(f"Attack pairs: {len(attack_pairs):,} (name, email) pairs")
+    print(f"Attack method: {CONFIG['dp_attack_type']} "
+          f"({ATTACK_CONFIGS[CONFIG['dp_attack_type']]['template']} template)")
+    print("Privacy mechanism: DP-SGD (clip + Gaussian noise on all trainable gradients)")
+
+
 if __name__ == "__main__":
-    run_experiment()
+    if CONFIG["dp_noise_levels"]:
+        run_noise_sweep_experiment()
+    else:
+        run_experiment()

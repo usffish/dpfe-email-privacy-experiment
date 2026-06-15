@@ -46,9 +46,11 @@ The code still supports LoRA (`USE_LORA=1`) as a fallback for tighter VRAM budge
 
 ---
 
-## Why No Differential Privacy?
+## Why No Differential Privacy? (by default)
 
-The `circe` branch added DP-SGD noise (controlled by σ) to measure the privacy/utility tradeoff across 5 noise levels. This branch fixes **σ=0** (no noise, maximum memorization) and holds it constant — the variable under study is the *attack strategy*, not the privacy mechanism. So `main.py` has no Opacus / DP-SGD code at all; training is a standard PyTorch loop.
+The `circe` branch added DP-SGD noise (controlled by σ) to measure the privacy/utility tradeoff across 5 noise levels, using QLoRA + GPT-Neo-1.3B. By default this branch fixes **σ=0** (no noise, maximum memorization) and holds it constant — the variable under study is the *attack strategy*, not the privacy mechanism. Training is then a standard PyTorch loop.
+
+However, `main.py` also includes an **optional noise-sweep mode** (`DP_NOISE_LEVELS` env var) that reproduces `circe`'s Table 11 experiment — DP-SGD across 5 noise levels — but for **full fine-tuning + GPT-Neo-125M** instead of QLoRA + GPT-Neo-1.3B. See "Section 11 — DP-SGD Noise Sweep" below. This mode is off unless `DP_NOISE_LEVELS` is set.
 
 ---
 
@@ -217,7 +219,10 @@ This same class is reused for the HPO validation split (see below).
 
 ## Section 7 — LoRADPTrainer (fine-tuning)
 
-Despite the name (kept from the `circe` branch for compatibility), this class no longer does anything with differential privacy — it's a standard fine-tuning loop with optional LoRA.
+The name is kept from the `circe` branch for compatibility. By default (`DP_NOISE_LEVELS`
+unset) it's a standard fine-tuning loop with optional LoRA and no DP-SGD. When
+`DP_NOISE_LEVELS` is set, `train()` additionally applies DP-SGD noise via
+`_apply_dp_noise()` — see "Section 11 — DP-SGD Noise Sweep".
 
 ### _load_model()
 
@@ -244,7 +249,7 @@ for batch_idx, batch in enumerate(dataloader):
     (outputs.loss / accum_steps).backward()       # backward pass (scaled)
 
     if is_update_step:                            # every 8 batches (or last batch)
-        torch.nn.utils.clip_grad_norm_(..., CONFIG["max_grad_norm"])
+        self._apply_dp_noise(model, noise_multiplier)  # clip, +noise if sweeping
         optimizer.step()
         scheduler.step()
         optimizer.zero_grad()
@@ -252,7 +257,7 @@ for batch_idx, batch in enumerate(dataloader):
 
 - **Forward pass:** the model reads email text and predicts each next token; the difference from the real token is the loss.
 - **Backward pass:** computes how each trainable parameter contributed to the error. Dividing by `accum_steps` means 8 batches' worth of gradients sum to the same scale as one big batch.
-- **Gradient clipping:** rescales the gradient if its norm exceeds `max_grad_norm`, preventing destabilizing large updates — important for full fine-tuning where a bad step can corrupt many more parameters than with LoRA.
+- **`_apply_dp_noise()`:** always clips the gradient norm to `max_grad_norm` (same role as the old inline `clip_grad_norm_` call — prevents destabilizing large updates). When `noise_multiplier > 0` (noise-sweep mode), it additionally adds `Normal(0, noise_multiplier × max_grad_norm)` Gaussian noise to every trainable parameter's gradient — DP-SGD. With `noise_multiplier=0` (the default), this is identical to plain clipping.
 - **Optimizer step (every 8 batches):** nudges parameters toward lower loss using an average over `batch_size × accum_steps` effective examples (at the GPT-Neo v2 defaults: 32 × 8 = 256).
 
 The learning-rate schedule (`LR_SCHEDULE`: `linear` or `cosine`), `WEIGHT_DECAY`, and
@@ -367,6 +372,67 @@ For each attack type, results are appended to `results.json` and the file is rew
 ### 5. Print the final table
 
 `print_results_table()` uses `tabulate` to print a ranked grid: attack types sorted by success rate, with hit counts and correctness percentages.
+
+---
+
+## Section 11 — DP-SGD Noise Sweep (optional, `run_noise_sweep_experiment()`)
+
+This is the `circe`-branch equivalent: **Table 11** ("Attack Success Rate vs. Noise σ"),
+but for full fine-tuning + GPT-Neo-125M instead of QLoRA + GPT-Neo-1.3B. It's a
+separate entry point, selected at the bottom of `main.py`:
+
+```python
+if __name__ == "__main__":
+    if CONFIG["dp_noise_levels"]:
+        run_noise_sweep_experiment()   # DP_NOISE_LEVELS is set
+    else:
+        run_experiment()               # default: multi-attack-type comparison
+```
+
+### Why DP noise on *all* gradients, not just LoRA adapters
+
+In `circe`, only the LoRA adapter parameters were trainable, so DP-SGD noise was applied
+only to those — the frozen 4-bit base model needed no noise because it never received
+gradient updates. Here, `USE_LORA=0` means **every** parameter is trainable, so
+`_apply_dp_noise()` clips and (optionally) noises **all** trainable gradients. This is the
+direct generalization: "noise on the trainable parameters," same as `circe`, just applied
+to a bigger trainable set.
+
+### The sweep loop
+
+```python
+for noise in CONFIG["dp_noise_levels"]:        # default: 0, 0.0001, 0.0005, 0.002, 0.005
+    if noise in completed:
+        continue                                # resume support
+    model = trainer.train(..., noise_multiplier=noise)   # fresh full fine-tune
+    model.save_pretrained(f"model_checkpoint_sigma_{noise}")
+    attack_rate, correctness, num_hits = attacker.run_attack(
+        model, attack_pairs, CONFIG["dp_attack_type"], ...
+    )
+    privacy_enhancement = (1 - attack_rate / baseline_rate) * 100   # vs σ=0
+```
+
+- **One fresh full fine-tune per σ** — DP-SGD changes the training dynamics (every
+  optimizer step adds noise), so each noise level needs its own 3-epoch run from a
+  freshly-loaded pretrained checkpoint. Each run is saved to its own
+  `model_checkpoint_sigma_<σ>/` directory, so a crash mid-sweep only loses the
+  in-progress σ level (`table_11_results.json` records which σ levels are done).
+- **Single attack type** (`DP_ATTACK_TYPE`, default `zs_d_greedy` — the Carlini/DPFE
+  "Original Message [mailto:" template) — matches `circe`'s single Carlini-greedy
+  attack. The independent variable here is σ, not the attack strategy, so running all 15
+  attack types per σ would be 5× the cost for a question this experiment isn't asking.
+- **Privacy enhancement** is `(1 - attack_rate(σ) / attack_rate(0)) × 100` — how much the
+  attack success rate dropped relative to the no-noise baseline, same formula as `circe`.
+- **`_compute_epsilon()`** uses Opacus's `RDPAccountant` to report the (ε, δ=1e-5) privacy
+  budget after each epoch when `noise_multiplier > 0` — informational only, doesn't affect
+  training.
+
+### Output
+
+`results/<output_dir>/table_11_results.json` — one entry per σ:
+`{"noise", "attack_success_rate", "privacy_enhancement", "correctness", "num_hits"}`.
+`print_table11_results()` prints this as a `tabulate` grid, mirroring `circe`'s
+"Table 11" output format.
 
 ---
 
