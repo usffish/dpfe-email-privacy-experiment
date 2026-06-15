@@ -253,9 +253,14 @@ for batch_idx, batch in enumerate(dataloader):
 - **Forward pass:** the model reads email text and predicts each next token; the difference from the real token is the loss.
 - **Backward pass:** computes how each trainable parameter contributed to the error. Dividing by `accum_steps` means 8 batches' worth of gradients sum to the same scale as one big batch.
 - **Gradient clipping:** rescales the gradient if its norm exceeds `max_grad_norm`, preventing destabilizing large updates — important for full fine-tuning where a bad step can corrupt many more parameters than with LoRA.
-- **Optimizer step (every 8 batches):** nudges parameters toward lower loss using an average over `batch_size × accum_steps = 128` effective examples (at the v4 defaults: 16 × 8).
+- **Optimizer step (every 8 batches):** nudges parameters toward lower loss using an average over `batch_size × accum_steps` effective examples (at the GPT-Neo v2 defaults: 32 × 8 = 256).
 
-A **linear learning-rate schedule with warmup** ramps the learning rate up at the start of training then decays it linearly to zero — this is standard practice that stabilizes early training and avoids overshooting late in training.
+The learning-rate schedule (`LR_SCHEDULE`: `linear` or `cosine`), `WEIGHT_DECAY`, and
+`WARMUP_FRACTION` are now configurable to match `hpo_trial.py`'s search space — previously
+`main.py` hardcoded a linear schedule with zero warmup and AdamW's default weight decay
+(0.01), which the HPO winners didn't use. A **warmup** phase ramps the learning rate up from
+0 over the first `warmup_fraction` of training steps, then **decay** (linear-to-zero or
+cosine) brings it back down — this stabilizes early training and avoids overshooting late.
 
 ### load_checkpoint()
 

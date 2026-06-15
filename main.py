@@ -62,6 +62,7 @@ from torch.utils.data import Dataset, DataLoader
 from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
+    get_cosine_schedule_with_warmup,
     get_linear_schedule_with_warmup,
 )
 from peft import LoraConfig, get_peft_model, PeftModel, TaskType
@@ -131,6 +132,9 @@ CONFIG = {
     "batch_size":           int(os.getenv("BATCH_SIZE", 16)),
     "epochs":               int(os.getenv("EPOCHS", 3)),
     "learning_rate":        float(os.getenv("LEARNING_RATE", 5e-5)),
+    "lr_schedule":          os.getenv("LR_SCHEDULE", "linear"),
+    "weight_decay":         float(os.getenv("WEIGHT_DECAY", 0.01)),
+    "warmup_fraction":      float(os.getenv("WARMUP_FRACTION", 0.0)),
     "max_grad_norm":        float(os.getenv("MAX_GRAD_NORM", 1.0)),
     "seed":                 int(os.getenv("SEED", 42)),
     "device":               "cuda" if torch.cuda.is_available() else "cpu",
@@ -428,14 +432,21 @@ class LoRADPTrainer:
         optimizer = AdamW(
             filter(lambda p: p.requires_grad, model.parameters()),
             lr=CONFIG["learning_rate"],
+            weight_decay=CONFIG["weight_decay"],
         )
 
         n_batches = len(dataloader)
         optimizer_steps_per_epoch = max(1, n_batches // accum_steps)
         total_steps = optimizer_steps_per_epoch * epochs
-        scheduler = get_linear_schedule_with_warmup(
-            optimizer, num_warmup_steps=0, num_training_steps=total_steps
-        )
+        warmup_steps = int(total_steps * CONFIG["warmup_fraction"])
+        if CONFIG["lr_schedule"] == "cosine":
+            scheduler = get_cosine_schedule_with_warmup(
+                optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps
+            )
+        else:
+            scheduler = get_linear_schedule_with_warmup(
+                optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps
+            )
 
         for epoch in range(epochs):
             total_loss = 0.0
