@@ -69,6 +69,12 @@ HPO = {
     "batch_size_choices": [
         int(x) for x in os.getenv("HPO_BATCH_SIZE_CHOICES", "2,4,8,16,32").split(",")
     ],
+    # grad_accum_steps is NOT a search variable in gpt-neo-hpo-v2; adding it
+    # here requires a new study name (Optuna forbids extending a study's param
+    # space after trials exist). Default covers no-accum → production value.
+    "accum_steps_choices": [
+        int(x) for x in os.getenv("HPO_ACCUM_STEPS_CHOICES", "1,2,4,8").split(",")
+    ],
     "lr_min":     float(os.getenv("HPO_LR_MIN", "5e-6")),
     "lr_max":     float(os.getenv("HPO_LR_MAX", "5e-4")),
     "wd_max":     float(os.getenv("HPO_WD_MAX", "0.1")),
@@ -120,9 +126,9 @@ def train_one_trial(trial, train_texts, val_texts, tokenizer, device):
     weight_decay  = trial.suggest_float("weight_decay", 0.0, HPO["wd_max"])
     warmup_frac   = trial.suggest_float("warmup_fraction", 0.0, HPO["warmup_max"])
     max_grad_norm = trial.suggest_float("max_grad_norm", 0.1, 5.0, log=True)
+    accum_steps   = trial.suggest_categorical("grad_accum_steps", HPO["accum_steps_choices"])
     # epochs is NOT sampled — HyperBand controls budget via pruning after each epoch.
     epochs = HPO["max_epochs"]
-    accum_steps = CONFIG["grad_accum_steps"]
     # Clamp batch_size to stay within VRAM — activations scale as batch × seq_len².
     # Empirically verified on RTX A6000 (48 GB), GPT-Neo-125M full fine-tune,
     # one forward+backward pass:
@@ -136,11 +142,11 @@ def train_one_trial(trial, train_texts, val_texts, tokenizer, device):
     # empirically verified.
     max_safe = {128: 32, 256: 32, 512: 32, 768: 16, 1024: 8}
     batch_size = min(batch_size, max_safe[max_length])
-    trial.set_user_attr("effective_batch_size", batch_size)
+    trial.set_user_attr("effective_batch_size", batch_size * accum_steps)
 
     print(f"\n{'='*60}")
     print(f"Trial {trial.number}")
-    print(f"  lr={lr:.2e}  batch_size={batch_size}  max_length={max_length}  max_epochs={epochs}")
+    print(f"  lr={lr:.2e}  batch={batch_size}×{accum_steps}accum={batch_size*accum_steps}eff  max_length={max_length}  max_epochs={epochs}")
     print(f"  schedule={schedule}  weight_decay={weight_decay:.4f}  warmup={warmup_frac:.2f}")
     print(f"  max_grad_norm={max_grad_norm:.2f}")
     print(f"{'='*60}")
