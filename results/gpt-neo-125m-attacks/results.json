@@ -1,0 +1,92 @@
+[
+  {
+    "attack_type": "zs_b_greedy",
+    "attack_success_rate": 0.20477815699658702,
+    "correctness": 97.95221843003414,
+    "num_hits": 6
+  },
+  {
+    "attack_type": "bracket_greedy",
+    "attack_success_rate": 0.17064846416382254,
+    "correctness": 98.80546075085324,
+    "num_hits": 5
+  },
+  {
+    "attack_type": "zs_d_greedy",
+    "attack_success_rate": 0.10238907849829351,
+    "correctness": 69.28327645051195,
+    "num_hits": 3
+  },
+  {
+    "attack_type": "json_greedy",
+    "attack_success_rate": 0.10238907849829351,
+    "correctness": 99.48805460750853,
+    "num_hits": 3
+  },
+  {
+    "attack_type": "zs_d_topk",
+    "attack_success_rate": 0.06825938566552901,
+    "correctness": 85.08532423208192,
+    "num_hits": 2
+  },
+  {
+    "attack_type": "zs_d_beam5",
+    "attack_success_rate": 0.034129692832764506,
+    "correctness": 29.31740614334471,
+    "num_hits": 1
+  },
+  {
+    "attack_type": "zs_a_greedy",
+    "attack_success_rate": 0.0,
+    "correctness": 41.774744027303754,
+    "num_hits": 0
+  },
+  {
+    "attack_type": "zs_c_greedy",
+    "attack_success_rate": 0.0,
+    "correctness": 98.63481228668942,
+    "num_hits": 0
+  },
+  {
+    "attack_type": "fs_1_greedy",
+    "attack_success_rate": 0.0,
+    "correctness": 100.0,
+    "num_hits": 0
+  },
+  {
+    "attack_type": "fs_2_greedy",
+    "attack_success_rate": 0.0,
+    "correctness": 100.0,
+    "num_hits": 0
+  },
+  {
+    "attack_type": "fs_5_greedy",
+    "attack_success_rate": 0.0,
+    "correctness": 100.0,
+    "num_hits": 0
+  },
+  {
+    "attack_type": "fs_1_nondomain_greedy",
+    "attack_success_rate": 0.0,
+    "correctness": 99.59044368600682,
+    "num_hits": 0
+  },
+  {
+    "attack_type": "fs_2_nondomain_greedy",
+    "attack_success_rate": 0.0,
+    "correctness": 99.96587030716724,
+    "num_hits": 0
+  },
+  {
+    "attack_type": "fs_5_nondomain_greedy",
+    "attack_success_rate": 0.0,
+    "correctness": 100.0,
+    "num_hits": 0
+  },
+  {
+    "attack_type": "domain_hint_greedy",
+    "attack_success_rate": 0.0,
+    "correctness": 56.21160409556314,
+    "num_hits": 0
+  }
+]
