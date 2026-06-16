@@ -49,7 +49,7 @@ export MAX_GRAD_NORM=0.49
 
 # DP-SGD noise sweep — switches main.py into Table 11 mode.
 export DP_NOISE_LEVELS=0,0.0001,0.0005,0.002,0.005
-export DP_ATTACK_TYPE=zs_d_greedy
+export DP_ATTACK_TYPE=zs_b_greedy  # most effective from attack experiment (0.20%, 6 hits)
 
 source ${REAL_HOME}/miniconda3/etc/profile.d/conda.sh
 conda activate my_environment
