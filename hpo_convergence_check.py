@@ -25,7 +25,7 @@ STORAGE = os.getenv(
 STATE_FILE  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hpo_v3_state.json")
 BATCH_SIZE  = 8
 IMPROVE_THRESHOLD = 0.01   # 1% improvement threshold
-CONVERGE_BATCHES  = 2      # consecutive non-improving batches to declare convergence
+CONVERGE_BATCHES  = 4      # consecutive non-improving batches to declare convergence
 SBATCH_FILE = "slurm/run_hpo_gptneo.sbatch"
 
 import optuna
