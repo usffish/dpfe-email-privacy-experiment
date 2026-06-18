@@ -318,13 +318,23 @@ def main():
         optuna.storages.journal.JournalFileBackend(HPO["storage"])
     )
 
+    # multivariate=True + group=True models hyperparameter *interactions*
+    # (e.g. effective LR depends jointly on learning_rate × batch_size ×
+    # grad_accum_steps) instead of sampling each param independently — the
+    # default univariate TPE misses exactly the couplings v3 introduced.
+    # min_resource=2 softens HyperBand: a trial must survive 2 epochs before
+    # it can be pruned, so configs are judged on a real val-loss trajectory
+    # rather than a noisy epoch-1 reading. This feeds TPE more *completed*
+    # trials, which it needs to build a useful surrogate. Sampler/pruner are
+    # not part of the frozen search space, so changing them on the existing
+    # gpt-neo-hpo-v3 study is allowed.
     study = optuna.create_study(
         study_name=HPO["study_name"],
         storage=storage,
         direction="minimize",
-        sampler=optuna.samplers.TPESampler(),
+        sampler=optuna.samplers.TPESampler(multivariate=True, group=True),
         pruner=optuna.pruners.HyperbandPruner(
-            min_resource=1,
+            min_resource=2,
             max_resource=HPO["max_epochs"],
             reduction_factor=3,
         ),
