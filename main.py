@@ -191,12 +191,37 @@ def set_seed(seed):
         torch.cuda.manual_seed_all(seed)
 
 
+def _normalize_name_for_pattern(name):
+    """
+    Normalize a raw header/body name for pattern classification only.
+
+    Enron 'From' headers store names as 'Last, First M' and sometimes carry
+    trailing fragments like '(417)' or '(CGT Mgr)'. Left as-is these break
+    pattern detection: the comma stays glued to the token ('harris,') and the
+    Last-First order defeats every first-last rule, so the pair falls through
+    to 'z' (memorized) even when it follows a standard scheme. This swaps to
+    First-Last, drops parenthetical fragments and standalone digit tokens.
+
+    NOTE: this affects pattern *labeling* only — attack prompts still use the
+    raw name as it appeared in training.
+    """
+    name = re.sub(r"\([^)]*\)", " ", name)          # drop "(417)", "(CGT Mgr)"
+    if "," in name:
+        parts = [p.strip() for p in name.split(",") if p.strip()]
+        if len(parts) == 2:
+            last, first = parts
+            name = f"{first} {last}"                 # "Harris, Duane" -> "Duane Harris"
+        else:
+            name = " ".join(parts)
+    return " ".join(w for w in name.split() if not w.isdigit())
+
+
 def get_pattern_type(name, email_addr):
     """
     Classify the structural relationship between a person's name and their email local-part.
     Returns a code: b1=first.last, b6=flast, b10=initials, z=memorized (no detectable pattern).
     """
-    n = name.lower().split()
+    n = _normalize_name_for_pattern(name).lower().split()
     local = email_addr.split('@')[0].lower()
 
     if len(n) == 1:
