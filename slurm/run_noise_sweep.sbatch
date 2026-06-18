@@ -7,7 +7,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64G
-#SBATCH --time=36:00:00
+#SBATCH --time=60:00:00
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=ismailj@usf.edu
 
@@ -48,8 +48,8 @@ export MAX_LENGTH=512
 export MAX_GRAD_NORM=2.78
 
 # DP-SGD noise sweep — switches main.py into Table 11 mode.
-export DP_NOISE_LEVELS=0,0.0001,0.0005,0.002,0.005
-export DP_ATTACK_TYPE=zs_b_greedy  # most effective from attack experiment (0.20%, 6 hits)
+export DP_NOISE_LEVELS=0,0.0001,0.0005,0.002,0.005,0.01,0.05,0.1
+export DP_ATTACK_TYPE=zs_b_greedy  # updated by chain from v3 attack results
 
 source ${REAL_HOME}/miniconda3/etc/profile.d/conda.sh
 conda activate my_environment
