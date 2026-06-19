@@ -1,0 +1,51 @@
+[
+  {
+    "noise": 0.0,
+    "attack_success_rate": 0.20477815699658702,
+    "privacy_enhancement": 0.0,
+    "correctness": 98.77133105802048,
+    "num_hits": 6
+  },
+  {
+    "noise": 0.0001,
+    "attack_success_rate": 0.13651877133105803,
+    "privacy_enhancement": 33.33333333333333,
+    "correctness": 98.49829351535836,
+    "num_hits": 4
+  },
+  {
+    "noise": 0.0005,
+    "attack_success_rate": 0.10238907849829351,
+    "privacy_enhancement": 50.0,
+    "correctness": 98.15699658703072,
+    "num_hits": 3
+  },
+  {
+    "noise": 0.002,
+    "attack_success_rate": 0.13651877133105803,
+    "privacy_enhancement": 33.33333333333333,
+    "correctness": 97.64505119453925,
+    "num_hits": 4
+  },
+  {
+    "noise": 0.005,
+    "attack_success_rate": 0.13651877133105803,
+    "privacy_enhancement": 33.33333333333333,
+    "correctness": 96.79180887372013,
+    "num_hits": 4
+  },
+  {
+    "noise": 0.01,
+    "attack_success_rate": 0.06825938566552901,
+    "privacy_enhancement": 66.66666666666666,
+    "correctness": 96.27986348122867,
+    "num_hits": 2
+  },
+  {
+    "noise": 0.05,
+    "attack_success_rate": 0.0,
+    "privacy_enhancement": 100.0,
+    "correctness": 94.40273037542663,
+    "num_hits": 0
+  }
+]
