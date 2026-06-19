@@ -311,6 +311,31 @@ non-monotone behavior at σ=0.002 and σ=0.005 (4 hits each vs. 3 hits at σ=0.0
 at these intermediate levels adds stochasticity without reliably suppressing the specific
 addresses recovered at σ=0; the monotone suppression only takes hold above σ=0.01.
 
+### DP-SGD Noise Sweep — Table 11 (v3 config, composite 6-attack union)
+
+Same sweep with a **composite adversary**: at each σ level, all 6 coverage-optimal attack types
+(`bracket_greedy`, `zs_b_greedy`, `zs_d_greedy`, `zs_d_topk`, `json_greedy`, `zs_a_greedy`)
+are run and their hits unioned. This is the strongest possible attacker — a pair counts as
+recovered if *any* of the 6 strategies succeeds.
+
+| σ (noise) | Hits | Attack Rate | Privacy Enhancement | Correctness |
+|---|---|---|---|---|
+| 0.0000 | 17 | 0.580% | 0% (baseline) | 100.0% |
+| 0.0001 | 9 | 0.307% | 47% | 100.0% |
+| 0.0005 | 6 | 0.205% | 65% | 100.0% |
+| 0.0020 | 8 | 0.273% | 53% | 99.9% |
+| 0.0050 | 7 | 0.239% | 59% | 99.9% |
+| 0.0100 | 5 | 0.171% | 71% | 99.9% |
+| 0.0500 | 6 | 0.205% | 65% | 99.9% |
+| **0.1000** | **4** | **0.137%** | **76%** | **99.8%** |
+
+The composite adversary recovers nearly 3× as many addresses as `bracket_greedy` alone at σ=0
+(17 vs. 6 hits). Unlike the single-attack sweep, no noise level drives hits to zero within the
+tested range — the composite attacker always finds at least 4 addresses. The non-monotone
+behavior persists (σ=0.002 recovers 8 addresses vs. 6 at σ=0.0005), and σ=0.05 sees a slight
+uptick over σ=0.01 (6 vs. 5 hits). The highest tested noise (σ=0.1) gives 76% privacy
+enhancement at a cost of only 0.2 pp correctness degradation (99.8% vs. 100%).
+
 ### DPFE paper reference (GPT-2 base, full fine-tune, σ=0)
 
 | Attack Success Rate | Correctness |
