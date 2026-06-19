@@ -1,0 +1,58 @@
+[
+  {
+    "noise": 0.0,
+    "attack_success_rate": 0.5802047781569966,
+    "privacy_enhancement": 0.0,
+    "correctness": 100.0,
+    "num_hits": 17
+  },
+  {
+    "noise": 0.0001,
+    "attack_success_rate": 0.3071672354948805,
+    "privacy_enhancement": 47.05882352941176,
+    "correctness": 100.0,
+    "num_hits": 9
+  },
+  {
+    "noise": 0.0005,
+    "attack_success_rate": 0.20477815699658702,
+    "privacy_enhancement": 64.70588235294117,
+    "correctness": 100.0,
+    "num_hits": 6
+  },
+  {
+    "noise": 0.002,
+    "attack_success_rate": 0.27303754266211605,
+    "privacy_enhancement": 52.941176470588225,
+    "correctness": 99.89761092150171,
+    "num_hits": 8
+  },
+  {
+    "noise": 0.005,
+    "attack_success_rate": 0.2389078498293515,
+    "privacy_enhancement": 58.82352941176471,
+    "correctness": 99.89761092150171,
+    "num_hits": 7
+  },
+  {
+    "noise": 0.01,
+    "attack_success_rate": 0.17064846416382254,
+    "privacy_enhancement": 70.58823529411764,
+    "correctness": 99.89761092150171,
+    "num_hits": 5
+  },
+  {
+    "noise": 0.05,
+    "attack_success_rate": 0.20477815699658702,
+    "privacy_enhancement": 64.70588235294117,
+    "correctness": 99.93174061433447,
+    "num_hits": 6
+  },
+  {
+    "noise": 0.1,
+    "attack_success_rate": 0.13651877133105803,
+    "privacy_enhancement": 76.47058823529412,
+    "correctness": 99.82935153583618,
+    "num_hits": 4
+  }
+]
