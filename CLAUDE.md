@@ -20,6 +20,24 @@ compaction/session boundaries, independent of the conversation summary.
 
 Never add Claude/Anthropic as a co-author in git commit messages.
 
+## Model and effort level guide
+
+| Task type | Model | Approach |
+|---|---|---|
+| Read a file, quick grep, git status | Sonnet | Direct tool call, no subagent |
+| Edit a file, update docs, small code fix | Sonnet | Direct, inline |
+| Understand a result / answer a question | Sonnet | Inline reasoning, no subagent |
+| Broad codebase exploration (>3 searches) | Sonnet | Spawn Explore subagent |
+| Loop / auto-drive monitoring | Sonnet | ScheduleWakeup + SSH via socket |
+| Multi-file refactor or complex new feature | Sonnet | Inline, read all affected files first |
+| Independent code review / second opinion | Sonnet | Spawn code-reviewer subagent |
+
+**Never need Opus for this project** — all tasks are code edits, SSH commands, JSON parsing,
+and doc updates. Opus adds latency and cost with no quality benefit here.
+
+**Subagents**: only spawn for open-ended codebase searches or genuinely parallel independent
+work. Don't spawn to do something you can do in 1-2 tool calls inline.
+
 ## CIRCE SSH access
 
 CIRCE only accepts Kerberos/password auth — SSH key login is disabled. However, the local
