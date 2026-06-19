@@ -393,8 +393,9 @@ REAL_HOME=/home/i/ismailj   # replace ismailj with your NetID
 ├── CODE_EXPLANATION.md           # Code walkthrough / data-flow reference
 ├── slurm/
 │   ├── run_attacks.sbatch        # SLURM job: full attack experiment (GPT-Neo 125M)
-│   ├── run_noise_sweep.sbatch    # SLURM job: DP-SGD noise sweep, Table 11 (GPT-Neo 125M, full FT)
-│   ├── run_hpo_gptneo.sbatch     # SLURM job: one HPO trial (GPT-Neo 125M)
+│   ├── run_noise_sweep.sbatch       # SLURM job: DP-SGD noise sweep, single attack (bracket_greedy)
+│   ├── run_composite_sweep.sbatch   # SLURM job: DP-SGD noise sweep, composite 6-attack union
+│   ├── run_hpo_gptneo.sbatch        # SLURM job: one HPO trial (GPT-Neo 125M)
 │   └── run_hpo_gptneo_probe.sbatch  # SLURM job: GPT-Neo long-context HPO probe
 ├── hpo/
 │   └── enqueue_len_probe.py      # Seed gpt-neo-len-probe with v2's winning trial
@@ -406,9 +407,12 @@ REAL_HOME=/home/i/ismailj   # replace ismailj with your NetID
     │   ├── results.json               # Per-attack-type results
     │   ├── model_checkpoint/          # Saved fine-tuned model
     │   └── predictions/               # Per-pair predictions for each attack type
-    ├── gpt-neo-125m-v3-noise-sweep/   # Table 11 replication (v3 config, bracket_greedy)
-    │   ├── table_11_results.json      # ASR / privacy enhancement / correctness per σ
-    │   └── predictions/               # Per-pair predictions for each σ level
+    ├── gpt-neo-125m-v3-noise-sweep/        # Table 11: single attack (bracket_greedy)
+    │   ├── table_11_results.json           # ASR / privacy enhancement / correctness per σ
+    │   └── predictions/                    # Per-pair predictions for each σ level
+    ├── gpt-neo-125m-v3-composite-sweep/   # Table 11: composite 6-attack union
+    │   ├── table_11_results.json
+    │   └── predictions/sigma_<σ>/         # Per-attack-type predictions for each σ level
     └── gpt-neo-125m-attacks/          # v2 config (gpt-neo-hpo-v2, for reference)
         ├── results.json
         ├── model_checkpoint/

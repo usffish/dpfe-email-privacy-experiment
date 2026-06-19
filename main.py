@@ -166,10 +166,17 @@ CONFIG = {
     "dp_attack_type":       os.getenv("DP_ATTACK_TYPE", "zs_d_greedy"),
 }
 
-if CONFIG["dp_noise_levels"] and CONFIG["dp_attack_type"] not in ATTACK_CONFIGS:
+# The 6 attack types whose union covers all 15 uniquely recoverable addresses (v3 run)
+COMPOSITE_ATTACK_TYPES = [
+    "bracket_greedy", "zs_b_greedy", "zs_d_greedy",
+    "zs_d_topk", "json_greedy", "zs_a_greedy",
+]
+
+if CONFIG["dp_noise_levels"] and CONFIG["dp_attack_type"] not in ATTACK_CONFIGS \
+        and CONFIG["dp_attack_type"] != "composite":
     raise ValueError(
         f"Unknown DP_ATTACK_TYPE: {CONFIG['dp_attack_type']!r}\n"
-        f"Valid types: {sorted(ATTACK_CONFIGS)}"
+        f"Valid types: {sorted(ATTACK_CONFIGS)} or 'composite'"
     )
 
 if os.getenv("SMOKE", "0") == "1":
@@ -777,6 +784,39 @@ class PrivacyAttack:
         correctness = valid_format_count / total * 100
         return attack_rate, correctness, successful
 
+    def run_composite_attack(self, model, name_email_pairs, attack_types,
+                             predictions_dir, email_freq=None):
+        """
+        Run multiple attack types and union their hits.
+        A pair counts as a hit if ANY attack type recovers the correct address.
+        Saves per-attack predictions to predictions_dir/<attack_type>.json.
+        Returns (union_attack_rate%, union_correctness%, union_num_hits).
+        """
+        total = len(name_email_pairs)
+        hit_set = set()       # true_email values hit by any attack
+        correct_set = set()   # true_email values where any attack produced a valid email
+
+        for attack_type in attack_types:
+            pred_path = os.path.join(predictions_dir, f"{attack_type}.json")
+            self.run_attack(
+                model, name_email_pairs, attack_type,
+                predictions_path=pred_path,
+                email_freq=email_freq,
+            )
+            with open(pred_path) as f:
+                preds = json.load(f)
+            for r in preds:
+                if r["hit"]:
+                    hit_set.add(r["true_email"].lower())
+                if r["valid_format"]:
+                    correct_set.add(r["true_email"].lower())
+
+        # Re-score at pair level: a pair is a hit if its true_email is in hit_set
+        all_emails = [e.lower() for _, e in name_email_pairs]
+        num_hits = sum(1 for e in all_emails if e in hit_set)
+        num_correct = sum(1 for e in all_emails if e in correct_set)
+        return num_hits / total * 100, num_correct / total * 100, num_hits
+
 
 # ============================================================
 # Helper functions for building attack support data
@@ -1072,12 +1112,21 @@ def run_noise_sweep_experiment():
             model.save_pretrained(checkpoint_dir)
             print(f"  Checkpoint saved → {checkpoint_dir}")
 
-        predictions_path = os.path.join(CONFIG["output_dir"], "predictions", f"sigma_{noise}.json")
-        attack_rate, correctness, num_hits = attacker.run_attack(
-            model, attack_pairs, CONFIG["dp_attack_type"],
-            predictions_path=predictions_path,
-            email_freq=email_freq,
-        )
+        if CONFIG["dp_attack_type"] == "composite":
+            pred_dir = os.path.join(CONFIG["output_dir"], "predictions", f"sigma_{noise}")
+            os.makedirs(pred_dir, exist_ok=True)
+            attack_rate, correctness, num_hits = attacker.run_composite_attack(
+                model, attack_pairs, COMPOSITE_ATTACK_TYPES,
+                predictions_dir=pred_dir,
+                email_freq=email_freq,
+            )
+        else:
+            predictions_path = os.path.join(CONFIG["output_dir"], "predictions", f"sigma_{noise}.json")
+            attack_rate, correctness, num_hits = attacker.run_attack(
+                model, attack_pairs, CONFIG["dp_attack_type"],
+                predictions_path=predictions_path,
+                email_freq=email_freq,
+            )
 
         if baseline_rate is None:
             baseline_rate = attack_rate
@@ -1135,8 +1184,11 @@ def print_table11_results(results, attack_pairs):
     print(f"Model: {CONFIG['model_name']} (full fine-tuning, no LoRA)")
     print(f"Dataset: ENRON Email Corpus ({CONFIG['max_emails']:,} emails)")
     print(f"Attack pairs: {len(attack_pairs):,} (name, email) pairs")
-    print(f"Attack method: {CONFIG['dp_attack_type']} "
-          f"({ATTACK_CONFIGS[CONFIG['dp_attack_type']]['template']} template)")
+    if CONFIG["dp_attack_type"] == "composite":
+        print(f"Attack method: composite ({', '.join(COMPOSITE_ATTACK_TYPES)})")
+    else:
+        print(f"Attack method: {CONFIG['dp_attack_type']} "
+              f"({ATTACK_CONFIGS[CONFIG['dp_attack_type']]['template']} template)")
     print("Privacy mechanism: DP-SGD (clip + Gaussian noise on all trainable gradients)")
 
 
