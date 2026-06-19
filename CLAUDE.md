@@ -39,6 +39,8 @@ Never add Claude/Anthropic as a co-author in git commit messages.
 - **Medium** — think before acting; good for bugs or multi-step changes where a wrong first move wastes time
 - **High** — extended reasoning; only for open-ended design questions with real tradeoffs
 
+**Convention**: append `(model, effort)` to each response so the user can switch. E.g. `(Sonnet, low)` for SSH/git ops, `(Sonnet, medium)` for debugging, `(Sonnet, high)` for design decisions.
+
 **Never need Opus for this project** — all tasks are code edits, SSH commands, JSON parsing,
 and doc updates. Opus adds latency and cost with no quality benefit here.
 
