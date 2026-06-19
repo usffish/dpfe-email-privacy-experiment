@@ -143,16 +143,16 @@ CONFIG = {
 
 `os.getenv("MODEL_NAME", "gpt2")` means: "look for an environment variable called `MODEL_NAME`; if it exists use that value, otherwise use the default `gpt2`." This is how the same code runs GPT-2 vs. GPT-Neo, LoRA vs. full fine-tuning, and different hyperparameters — all without changing a line of Python, just by changing the SLURM `.sbatch` file.
 
-Key settings (current production defaults, from the v4 HPO sweep — see README):
+Key settings (current production defaults, from the `gpt-neo-hpo-v3` sweep — see README):
 
 | Setting | Value | Meaning |
 |---|---|---|
-| `model_name` | `gpt2` (or `EleutherAI/gpt-neo-125M`) | which model to fine-tune |
-| `learning_rate` | `9.82e-05` | AdamW step size (HPO best) |
-| `batch_size` | `16` | emails processed per step (HPO best) |
+| `model_name` | `EleutherAI/gpt-neo-125M` | which model to fine-tune |
+| `learning_rate` | `1.32e-05` | AdamW step size (HPO v3 best) |
+| `batch_size` | `32` | emails processed per step (HPO v3 best) |
+| `grad_accum_steps` | `2` | accumulate gradients over 2 batches before updating |
 | `max_length` | `512` | tokens per email — longer sequences capture more memorizable structure |
-| `max_grad_norm` | `4.63` | gradient clipping threshold (HPO best) |
-| `grad_accum_steps` | `8` | accumulate gradients over 8 batches before updating |
+| `max_grad_norm` | `2.78` | gradient clipping threshold (HPO v3 best) |
 | `epochs` | `3` | training passes over the data |
 | `max_emails` | `50000` | training corpus size |
 | `subset_pairs` | `3238` | number of (name, email) pairs attacked |
@@ -170,6 +170,8 @@ Two special flags override CONFIG when set to `1`:
 `set_seed(seed)` seeds Python's, NumPy's, and PyTorch's random number generators so that training is reproducible — same data order, same initial randomness, every run.
 
 `get_pattern_type(name, email_addr)` is an analysis helper: given a person's name and their real email address, it classifies the *structural relationship* between them — e.g. `b1` = `first.last@domain`, `b6` = `flast@domain`, `z` = no detectable pattern (looks "memorized" rather than guessable from a formula). This is stored per-prediction so later analysis can ask "does the attack succeed more often on `first.last`-style addresses than on irregular ones?"
+
+A preprocessing helper `_normalize_name_for_pattern(name)` runs before classification to handle the 28% of corpus pairs stored in "Last, First" comma format (e.g. `"Harris, Duane"` → `"Duane Harris"`). Without this normalization, comma-format names all fall through to class `z` (no pattern detectable), inflating the "memorized" fraction from the true 28.9% to a spurious 50.4%. The fix has no effect on attack hit counts — it only corrects the post-hoc pattern-type labels.
 
 ---
 
@@ -401,7 +403,7 @@ to a bigger trainable set.
 ### The sweep loop
 
 ```python
-for noise in CONFIG["dp_noise_levels"]:        # default: 0, 0.0001, 0.0005, 0.002, 0.005
+for noise in CONFIG["dp_noise_levels"]:        # v3 sweep: 0, 0.0001, 0.0005, 0.002, 0.005, 0.01, 0.05
     if noise in completed:
         continue                                # resume support
     model = trainer.train(..., noise_multiplier=noise)   # fresh full fine-tune

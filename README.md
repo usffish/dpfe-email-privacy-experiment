@@ -78,21 +78,27 @@ informational attribute (`python view_hpo.py --study <name>`).
 
 ### Final config (used by `slurm/run_attacks.sbatch`)
 
-`gpt-neo-hpo-v2`, trial #20, val_loss=**2.2413**:
+`gpt-neo-hpo-v3` (30 trials, converged), val_loss=**2.2322**:
 
 | Hyperparameter | Value |
 |---|---|
-| `learning_rate` | 1.95e-05 |
+| `learning_rate` | 1.32e-05 |
 | `batch_size` | 32 |
+| `grad_accum_steps` | 2 |
 | `max_length` | 512 |
-| `lr_schedule` | cosine |
-| `weight_decay` | 0.0799 |
-| `warmup_fraction` | 0.0780 |
-| `max_grad_norm` | 0.49 |
+| `lr_schedule` | linear |
+| `weight_decay` | 0.0729 |
+| `warmup_fraction` | 0.0166 |
+| `max_grad_norm` | 2.78 |
+
+v3 extended the search space to include `grad_accum_steps` (affecting effective batch size)
+and used multivariate TPE with softer HyperBand pruning (`min_resource=2`). v2 trial #20
+(val_loss=2.2413) was the prior best; v3 improved it by 0.41% — confirmed as signal (seed
+variance std=0.0001, 40× smaller than the gap).
 
 A follow-up long-context probe found `max_length=768` gives a further ~0.94% improvement over
-512 (val_loss 2.2203 vs 2.2413), but that's within the noise of the top-3 spread at 512, so
-the final attack run used `max_length=512`.
+512 (val_loss 2.2203 vs 2.2413 v2), but that's within the noise of the top-3 spread at 512,
+so the final attack run used `max_length=512`.
 
 Full sweep history — search space, memory constraints, and every trial table — lives in
 **[`docs/HPO_RESULTS.md`](docs/HPO_RESULTS.md)**.
@@ -198,12 +204,12 @@ All hyperparameters are set via environment variables exported in the sbatch scr
 | Variable | Default | Description |
 |---|---|---|
 | `MODEL_NAME` | `EleutherAI/gpt-neo-125M` | HuggingFace model ID |
-| `LEARNING_RATE` | `1.95e-05` | AdamW learning rate (`gpt-neo-hpo-v2` best, trial #20) |
-| `BATCH_SIZE` | `32` | Physical batch size (`gpt-neo-hpo-v2` best) |
-| `GRAD_ACCUM_STEPS` | `8` | Gradient accumulation steps |
+| `LEARNING_RATE` | `1.32e-05` | AdamW learning rate (`gpt-neo-hpo-v3` best) |
+| `BATCH_SIZE` | `32` | Physical batch size (`gpt-neo-hpo-v3` best) |
+| `GRAD_ACCUM_STEPS` | `2` | Gradient accumulation steps (`gpt-neo-hpo-v3` best) |
 | `EPOCHS` | `3` | Fine-tuning epochs |
 | `MAX_LENGTH` | `512` | Token sequence length (HPO finding: 512 >> 128) |
-| `MAX_GRAD_NORM` | `0.49` | Gradient clipping (`gpt-neo-hpo-v2` best) |
+| `MAX_GRAD_NORM` | `2.78` | Gradient clipping (`gpt-neo-hpo-v3` best) |
 | `MAX_EMAILS` | `50000` | Training corpus size |
 | `USE_LORA` | `0` | Full fine-tuning (RTX A6000 has enough VRAM) |
 | `SEED` | `42` | Random seed |
@@ -232,34 +238,35 @@ All hyperparameters are set via environment variables exported in the sbatch scr
 
 ## Results
 
-### GPT-Neo 125M Attack Results (full 50k run, `gpt-neo-hpo-v2` trial #20 config, job 33121395)
+### GPT-Neo 125M Attack Results — v3 config (final)
 
 Full fine-tune of `EleutherAI/gpt-neo-125M` on 50,000 ENRON emails for 3 epochs using the
-`gpt-neo-hpo-v2` trial #20 config (lr=1.95e-05 cosine, weight_decay=0.0799,
-warmup_fraction=0.0780, max_length=512, batch_size=32 × grad_accum=8, max_grad_norm=0.49).
-Runtime ~1h54m on an RTX 6000.
-
-**Training loss**: Epoch 1 → 2.7918, Epoch 2 → 2.4228, Epoch 3 → 2.3727 (final).
+`gpt-neo-hpo-v3` best config (lr=1.32e-05 linear, weight_decay=0.0729, warmup_fraction=0.0166,
+max_length=512, batch_size=32 × grad_accum=2, max_grad_norm=2.78, val_loss=2.2322).
 
 **Attack results** (all 15 default attack types, 2,930 (name, email) pairs):
 
 | Rank | Attack Type | Hits | Attack% | Correct% |
 |---|---|---|---|---|
-| 1 | zs_b_greedy | 6 | 0.20% | 98.0% |
-| 2 | bracket_greedy | 5 | 0.17% | 98.8% |
-| 3 | zs_d_greedy | 3 | 0.10% | 69.3% |
-| 4 | json_greedy | 3 | 0.10% | 99.5% |
-| 5 | zs_d_topk | 2 | 0.07% | 85.1% |
-| 6 | zs_d_beam5 | 1 | 0.03% | 29.3% |
-| 7 | zs_a_greedy | 0 | 0.00% | 41.8% |
-| 8 | zs_c_greedy | 0 | 0.00% | 98.6% |
+| 1 | bracket_greedy | 6 | 0.20% | 98.8% |
+| 2 | zs_b_greedy | 5 | 0.17% | 98.3% |
+| 3 | zs_d_greedy | 3 | 0.10% | 67.8% |
+| 4 | json_greedy | 3 | 0.10% | 99.1% |
+| 5 | zs_a_greedy | 2 | 0.07% | 41.9% |
+| 6 | zs_d_topk | 2 | 0.07% | 85.6% |
+| 7 | zs_c_greedy | 1 | 0.03% | 98.7% |
+| 8 | zs_d_beam5 | 1 | 0.03% | 31.8% |
 | 9 | fs_1_greedy | 0 | 0.00% | 100.0% |
 | 10 | fs_2_greedy | 0 | 0.00% | 100.0% |
 | 11 | fs_5_greedy | 0 | 0.00% | 100.0% |
-| 12 | fs_1_nondomain_greedy | 0 | 0.00% | 99.6% |
+| 12 | fs_1_nondomain_greedy | 0 | 0.00% | 99.4% |
 | 13 | fs_2_nondomain_greedy | 0 | 0.00% | 100.0% |
 | 14 | fs_5_nondomain_greedy | 0 | 0.00% | 100.0% |
-| 15 | domain_hint_greedy | 0 | 0.00% | 56.2% |
+| 15 | domain_hint_greedy | 0 | 0.00% | 59.5% |
+
+**Union across all 15 attack types: 15 unique addresses recovered** (v2 config recovered 12).
+The v3 ⊃ v2 strict superset relationship holds at address-level: every address v2 found,
+v3 also found, plus 3 new ones.
 
 **Finding: zero-shot/format attacks default to `@enron.com`; few-shot attacks default
 elsewhere — neither retrieves the true memorized address.**
@@ -282,18 +289,39 @@ attacks are ~100% correct (the model reliably emits *some* email-shaped string) 
 priming with examples changes which generic pattern the model defaults to, but doesn't help
 it recall the actual memorized target.
 
+### DP-SGD Noise Sweep — Table 11 (v3 config, `bracket_greedy` attack)
+
+DP-SGD applied to full fine-tuning of GPT-Neo-125M (v3 config), swept across 7 noise levels.
+Attack evaluated with `bracket_greedy` (best single attack type from the v3 run above).
+
+| σ (noise) | Hits | Attack Rate | Privacy Enhancement | Correctness |
+|---|---|---|---|---|
+| 0.0000 | 6 | 0.205% | 0% (baseline) | 98.8% |
+| 0.0001 | 4 | 0.137% | 33% | 98.5% |
+| 0.0005 | 3 | 0.102% | 50% | 98.2% |
+| 0.0020 | 4 | 0.137% | 33% | 97.6% |
+| 0.0050 | 4 | 0.137% | 33% | 96.8% |
+| 0.0100 | 2 | 0.068% | 67% | 96.3% |
+| **0.0500** | **0** | **0.000%** | **100%** | **94.4%** |
+
+**Threshold: σ = 0.05 reduces attack success rate to zero.** Correctness drops from 98.8% to
+94.4% (−4.4 pp) at the threshold — the model still generates valid email-shaped output for
+94% of targets, it just no longer retrieves any real memorized addresses. Note the
+non-monotone behavior at σ=0.002 and σ=0.005 (4 hits each vs. 3 hits at σ=0.0005) — noise
+at these intermediate levels adds stochasticity without reliably suppressing the specific
+addresses recovered at σ=0; the monotone suppression only takes hold above σ=0.01.
+
 ### DPFE paper reference (GPT-2 base, full fine-tune, σ=0)
 
 | Attack Success Rate | Correctness |
 |---|---|
 | 1.2% | 100% |
 
-The GPT-Neo-125M run's best attack type (`zs_b_greedy`, 0.20%, 6/2930 hits) is well below
-this reference. The comparison isn't apples-to-apples — different model, different attack
-templates, and an eval set deliberately restricted to non-Enron-domain (name, email) pairs
-(so the `@enron.com`-defaulting behavior above can never hit for most targets) — but it's
-directionally consistent with a smaller, format-saturated model leaning on its single
-strongest memorized pattern rather than retrieving individual targets.
+The GPT-Neo-125M v3 run's best attack type (`bracket_greedy`, 0.20%, 6/2930 hits) is well
+below this reference. The comparison isn't apples-to-apples — different model, different
+attack templates, and an eval set deliberately restricted to non-Enron-domain (name, email)
+pairs — but it's directionally consistent with a smaller, format-saturated model leaning on
+its single strongest memorized pattern rather than retrieving individual targets.
 
 ---
 
@@ -374,13 +402,17 @@ REAL_HOME=/home/i/ismailj   # replace ismailj with your NetID
 │   └── HPO_RESULTS.md            # Full chronological HPO sweep history
 ├── enron_data/                   # Email corpus (not tracked)
 └── results/
-    └── gpt-neo-125m-attacks/
-        ├── results.json              # Per-attack-type results
-        ├── model_checkpoint/         # Saved fine-tuned model
+    ├── gpt-neo-125m-v3-attacks/       # v3 config (gpt-neo-hpo-v3 best, final)
+    │   ├── results.json               # Per-attack-type results
+    │   ├── model_checkpoint/          # Saved fine-tuned model
+    │   └── predictions/               # Per-pair predictions for each attack type
+    ├── gpt-neo-125m-v3-noise-sweep/   # Table 11 replication (v3 config, bracket_greedy)
+    │   ├── table_11_results.json      # ASR / privacy enhancement / correctness per σ
+    │   └── predictions/               # Per-pair predictions for each σ level
+    └── gpt-neo-125m-attacks/          # v2 config (gpt-neo-hpo-v2, for reference)
+        ├── results.json
+        ├── model_checkpoint/
         └── predictions/
-            ├── zs_d_greedy.json      # Per-pair predictions for each attack type
-            ├── fs_5_greedy.json
-            └── ...
 ```
 
 ---
