@@ -76,3 +76,6 @@ ssh -o ControlMaster=no -o ControlPath=~/.ssh/sockets/%r@%h:%p circe "<command>"
 
 If the socket is missing (user closed their terminal or VPN dropped): stop and ask the user
 to reconnect CIRCE in their terminal. The socket appears as soon as they SSH in.
+
+**Always run CIRCE commands yourself** via the socket above. Never ask the user to paste
+commands or output — only fall back to asking if the socket is confirmed unavailable.
