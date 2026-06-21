@@ -571,6 +571,24 @@ class LoRADPTrainer:
         model.eval()
         return model
 
+    def compute_val_loss(self, model, val_texts, batch_size=16):
+        """Compute mean cross-entropy loss on held-out val_texts with the given model."""
+        dataset = EmailDataset(val_texts, self.tokenizer, CONFIG["max_length"])
+        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+        model.eval()
+        total_loss = 0.0
+        num_batches = 0
+        with torch.no_grad():
+            for batch in dataloader:
+                outputs = model(
+                    input_ids=batch["input_ids"].to(self.device),
+                    attention_mask=batch["attention_mask"].to(self.device),
+                    labels=batch["labels"].to(self.device),
+                )
+                total_loss += outputs.loss.item()
+                num_batches += 1
+        return total_loss / max(num_batches, 1)
+
     def load_checkpoint(self, checkpoint_path):
         """Load a previously saved model checkpoint (LoRA or full fine-tune)."""
         print(f"  Loading checkpoint from {checkpoint_path}...", flush=True)
@@ -1077,9 +1095,13 @@ def run_noise_sweep_experiment():
     processor = EnronDataProcessor(CONFIG["data_dir"])
     processor.load_or_create_synthetic_data()
 
-    train_texts = processor.email_bodies[:CONFIG["max_emails"]]
+    all_texts = processor.email_bodies[:CONFIG["max_emails"]]
+    val_size = max(1, len(all_texts) // 10)
+    val_texts = all_texts[:val_size]
+    train_texts = all_texts[val_size:]
     attack_pairs = processor.name_email_pairs[:CONFIG["subset_pairs"]]
     print(f"  Training emails: {len(train_texts)}")
+    print(f"  Val emails:      {len(val_texts)}")
     print(f"  Attack pairs:    {len(attack_pairs)}")
 
     print("\n[Step 2] Building attack support structures...")
@@ -1112,6 +1134,11 @@ def run_noise_sweep_experiment():
             model.save_pretrained(checkpoint_dir)
             print(f"  Checkpoint saved → {checkpoint_dir}")
 
+        print(f"  Computing validation loss...", flush=True)
+        val_loss = trainer.compute_val_loss(model, val_texts, batch_size=CONFIG["batch_size"])
+        perplexity = float(np.exp(val_loss))
+        print(f"  Val loss: {val_loss:.4f}  Perplexity: {perplexity:.2f}")
+
         if CONFIG["dp_attack_type"] == "composite":
             pred_dir = os.path.join(CONFIG["output_dir"], "predictions", f"sigma_{noise}")
             os.makedirs(pred_dir, exist_ok=True)
@@ -1138,6 +1165,8 @@ def run_noise_sweep_experiment():
             "privacy_enhancement": privacy_enhancement,
             "correctness": correctness,
             "num_hits": num_hits,
+            "val_loss": val_loss,
+            "perplexity": perplexity,
         })
         results.sort(key=lambda r: r["noise"])
 

@@ -38,7 +38,7 @@ export WARMUP_FRACTION=0.0166
 export ATTACK_BATCH_SIZE=32
 export USE_LORA=0
 export MODEL_NAME=EleutherAI/gpt-neo-125M
-export OUTPUT_DIR=results/gpt-neo-125m-v3-composite-sweep-high-noise
+export OUTPUT_DIR=results/gpt-neo-125m-v3-composite-sweep-val-loss
 export MAX_EMAILS=50000
 export EPOCHS=3
 export SUBSET_PAIRS=3238
@@ -47,7 +47,7 @@ export BATCH_SIZE=32
 export MAX_LENGTH=512
 export MAX_GRAD_NORM=2.78
 
-export DP_NOISE_LEVELS=0.1,0.2,0.5,1.0,2.0,5.0
+export DP_NOISE_LEVELS=0,0.1,0.2,0.5,1.0,2.0,5.0,10.0,20.0,50.0
 export DP_ATTACK_TYPE=composite   # runs all 6 coverage-optimal attack types, unions hits
 
 source ${REAL_HOME}/miniconda3/etc/profile.d/conda.sh
