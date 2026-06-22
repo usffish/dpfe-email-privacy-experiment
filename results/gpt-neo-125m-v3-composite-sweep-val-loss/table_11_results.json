@@ -1,0 +1,92 @@
+[
+  {
+    "noise": 0.0,
+    "attack_success_rate": 0.5119453924914675,
+    "privacy_enhancement": 0.0,
+    "correctness": 100.0,
+    "num_hits": 15,
+    "val_loss": 2.487935826277277,
+    "perplexity": 12.036405228965569
+  },
+  {
+    "noise": 0.1,
+    "attack_success_rate": 0.17064846416382254,
+    "privacy_enhancement": 66.66666666666666,
+    "correctness": 99.82935153583618,
+    "num_hits": 5,
+    "val_loss": 3.3106225174703416,
+    "perplexity": 27.402178498289686
+  },
+  {
+    "noise": 0.2,
+    "attack_success_rate": 0.20477815699658702,
+    "privacy_enhancement": 60.0,
+    "correctness": 99.82935153583618,
+    "num_hits": 6,
+    "val_loss": 3.471462161677658,
+    "perplexity": 32.18376592759023
+  },
+  {
+    "noise": 0.5,
+    "attack_success_rate": 0.2389078498293515,
+    "privacy_enhancement": 53.333333333333336,
+    "correctness": 99.96587030716724,
+    "num_hits": 7,
+    "val_loss": 3.6535674690440962,
+    "perplexity": 38.61216835091599
+  },
+  {
+    "noise": 1.0,
+    "attack_success_rate": 0.2389078498293515,
+    "privacy_enhancement": 53.333333333333336,
+    "correctness": 99.96587030716724,
+    "num_hits": 7,
+    "val_loss": 3.7692914160953204,
+    "perplexity": 43.3493373079265
+  },
+  {
+    "noise": 2.0,
+    "attack_success_rate": 0.17064846416382254,
+    "privacy_enhancement": 66.66666666666666,
+    "correctness": 99.96587030716724,
+    "num_hits": 5,
+    "val_loss": 3.85160063026817,
+    "perplexity": 47.0683419816326
+  },
+  {
+    "noise": 5.0,
+    "attack_success_rate": 0.27303754266211605,
+    "privacy_enhancement": 46.66666666666666,
+    "correctness": 99.96587030716724,
+    "num_hits": 8,
+    "val_loss": 3.9225044523834423,
+    "perplexity": 50.526828487047545
+  },
+  {
+    "noise": 10.0,
+    "attack_success_rate": 0.20477815699658702,
+    "privacy_enhancement": 60.0,
+    "correctness": 99.96587030716724,
+    "num_hits": 6,
+    "val_loss": 3.9579264312792737,
+    "perplexity": 52.348664775977014
+  },
+  {
+    "noise": 20.0,
+    "attack_success_rate": 0.27303754266211605,
+    "privacy_enhancement": 46.66666666666666,
+    "correctness": 99.96587030716724,
+    "num_hits": 8,
+    "val_loss": 3.970636427022849,
+    "perplexity": 53.018262359582344
+  },
+  {
+    "noise": 50.0,
+    "attack_success_rate": 0.20477815699658702,
+    "privacy_enhancement": 60.0,
+    "correctness": 100.0,
+    "num_hits": 6,
+    "val_loss": 3.9560980341237064,
+    "perplexity": 52.25303807463752
+  }
+]
