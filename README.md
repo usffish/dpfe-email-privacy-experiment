@@ -336,6 +336,31 @@ behavior persists (σ=0.002 recovers 8 addresses vs. 6 at σ=0.0005), and σ=0.0
 uptick over σ=0.01 (6 vs. 5 hits). The highest tested noise (σ=0.1) gives 76% privacy
 enhancement at a cost of only 0.2 pp correctness degradation (99.8% vs. 100%).
 
+### DP-SGD Noise Sweep — Extended Range with Validation Loss (σ = 0 to 50)
+
+Extended sweep using the same composite adversary, reaching much higher noise levels to find the
+zero-hit threshold, with validation loss tracked to measure model degradation.
+
+| σ (noise) | Hits | ASR | Val Loss | Perplexity | Privacy Enh. |
+|---|---|---|---|---|---|
+| 0.0 | 15 | 0.512% | 2.488 | 12.0 | 0% (baseline) |
+| 0.1 | 5 | 0.171% | 3.311 | 27.4 | 67% |
+| 0.2 | 6 | 0.205% | 3.471 | 32.2 | 60% |
+| 0.5 | 7 | 0.239% | 3.654 | 38.6 | 53% |
+| 1.0 | 7 | 0.239% | 3.769 | 43.3 | 53% |
+| 2.0 | 5 | 0.171% | 3.852 | 47.1 | 67% |
+| 5.0 | 8 | 0.273% | 3.923 | 50.5 | 47% |
+| 10.0 | 6 | 0.205% | 3.958 | 52.3 | 60% |
+| 20.0 | 8 | 0.273% | 3.971 | 53.0 | 47% |
+| 50.0 | 6 | 0.205% | 3.956 | 52.3 | 60% |
+
+**Key finding**: No zero-hit noise level exists within σ = 0–50. Val loss plateaus at ~3.97 beyond
+σ = 5 (model fully degraded, perplexity ~52), yet the composite attacker still recovers 5–8
+addresses at every noise level tested. The non-monotone pattern persists — σ = 5 and σ = 20
+recover *more* addresses than σ = 1 and σ = 10. Some addresses are so deeply memorized that
+DP-SGD noise alone cannot suppress extraction, even when the model's language modeling ability
+is essentially destroyed.
+
 ### DPFE paper reference (GPT-2 base, full fine-tune, σ=0)
 
 | Attack Success Rate | Correctness |
