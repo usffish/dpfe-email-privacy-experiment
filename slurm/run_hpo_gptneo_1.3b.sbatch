@@ -33,7 +33,11 @@ export MAX_GRAD_NORM=1.0
 export SEED=42
 export USE_LORA=0
 
-export HPO_STUDY_NAME=${HPO_STUDY_NAME:-gpt-neo-1.3b-hpo-v1}
+# v2: restricted search space after OOM testing — batch=8/512 and batch=32/512 both OOM'd
+# Safe: batch<=8 at max_length=128/256; batch=2 at max_length=512 (untested, likely OK)
+export HPO_BATCH_SIZE_CHOICES=2,4,8
+export HPO_MAX_LENGTH_CHOICES=128,256
+export HPO_STUDY_NAME=${HPO_STUDY_NAME:-gpt-neo-1.3b-hpo-v2}
 export HPO_STORAGE=${HPO_STORAGE:-/home/i/ismailj/dpfe-email-privacy-experiment/hpo_study.jsonl}
 export HPO_N_TRIALS=${HPO_N_TRIALS:-1}
 export HPO_EMAILS=${HPO_EMAILS:-10000}
