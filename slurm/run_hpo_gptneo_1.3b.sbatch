@@ -33,10 +33,9 @@ export MAX_GRAD_NORM=1.0
 export SEED=42
 export USE_LORA=0
 
-# v2: batch=8/512 and batch=32/512 OOM'd; batch=2/4 at 512 untested but likely OK
-# v3: added max_length=512 back with batch capped at 4 to probe longer-context configs
+# v2: batch=8/512 and batch=32/512 OOM'd; 512 locked out of this study (Optuna CategoricalDistribution)
 export HPO_BATCH_SIZE_CHOICES=2,4,8
-export HPO_MAX_LENGTH_CHOICES=128,256,512
+export HPO_MAX_LENGTH_CHOICES=128,256
 export HPO_STUDY_NAME=${HPO_STUDY_NAME:-gpt-neo-1.3b-hpo-v2}
 export HPO_STORAGE=${HPO_STORAGE:-/home/i/ismailj/dpfe-email-privacy-experiment/hpo_study.jsonl}
 export HPO_N_TRIALS=${HPO_N_TRIALS:-1}
