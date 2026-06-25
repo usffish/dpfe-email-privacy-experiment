@@ -166,11 +166,14 @@ CONFIG = {
     "dp_attack_type":       os.getenv("DP_ATTACK_TYPE", "zs_d_greedy"),
 }
 
-# The 6 attack types whose union covers all 15 uniquely recoverable addresses (v3 run)
-COMPOSITE_ATTACK_TYPES = [
-    "bracket_greedy", "zs_b_greedy", "zs_d_greedy",
-    "zs_d_topk", "json_greedy", "zs_a_greedy",
-]
+# Default: the 6 attacks covering all 15 uniquely recoverable addresses in 125M v3 run.
+# Override via COMPOSITE_ATTACK_TYPES env var (comma-separated) for other models/runs.
+_composite_env = os.getenv("COMPOSITE_ATTACK_TYPES", "")
+COMPOSITE_ATTACK_TYPES = (
+    [x.strip() for x in _composite_env.split(",") if x.strip()]
+    if _composite_env
+    else ["bracket_greedy", "zs_b_greedy", "zs_d_greedy", "zs_d_topk", "json_greedy", "zs_a_greedy"]
+)
 
 if CONFIG["dp_noise_levels"] and CONFIG["dp_attack_type"] not in ATTACK_CONFIGS \
         and CONFIG["dp_attack_type"] != "composite":
