@@ -156,6 +156,7 @@ CONFIG = {
     "grad_accum_steps":     int(os.getenv("GRAD_ACCUM_STEPS", 1)),
     "attack_batch_size":    int(os.getenv("ATTACK_BATCH_SIZE", 1)),
     "use_lora":             os.getenv("USE_LORA", "1") == "1",
+    "gradient_checkpointing": os.getenv("GRADIENT_CHECKPOINTING", "0") == "1",
     # LoRA hyperparameters
     "lora_r":               int(os.getenv("LORA_R", 16)),
     "lora_alpha":           int(os.getenv("LORA_ALPHA", 32)),
@@ -181,6 +182,60 @@ if CONFIG["dp_noise_levels"] and CONFIG["dp_attack_type"] not in ATTACK_CONFIGS 
         f"Unknown DP_ATTACK_TYPE: {CONFIG['dp_attack_type']!r}\n"
         f"Valid types: {sorted(ATTACK_CONFIGS)} or 'composite'"
     )
+
+# GitHub-backed persistence for results JSON (bypasses full /home filesystem).
+# Set GITHUB_TOKEN + GITHUB_REPO in the sbatch script; set CHECKPOINT_DIR to
+# a /tmp path so model checkpoints never touch /home.
+_GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
+_GITHUB_REPO  = os.getenv("GITHUB_REPO", "usffish/attack")
+_CHECKPOINT_DIR = os.getenv("CHECKPOINT_DIR", "")  # if set, checkpoints go here instead of OUTPUT_DIR
+
+
+def _github_fetch_results(repo_path):
+    """Fetch results JSON from GitHub. Returns (list, sha) or ([], None)."""
+    if not _GITHUB_TOKEN:
+        return [], None
+    import urllib.request, base64 as _b64
+    url = f"https://api.github.com/repos/{_GITHUB_REPO}/contents/{repo_path}"
+    req = urllib.request.Request(url, headers={
+        "Authorization": f"token {_GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read())
+            content = _b64.b64decode(data["content"]).decode()
+            return json.loads(content), data["sha"]
+    except Exception as e:
+        print(f"  [GitHub] fetch failed ({e}); starting fresh.", flush=True)
+        return [], None
+
+
+def _github_push_results(results, repo_path, sha=None):
+    """Push results JSON to GitHub. Returns new sha or old sha on failure."""
+    if not _GITHUB_TOKEN:
+        return sha
+    import urllib.request, base64 as _b64
+    content = _b64.b64encode(json.dumps(results, indent=2).encode()).decode()
+    body = json.dumps({
+        "message": f"[auto] sweep update: {repo_path}",
+        "content": content,
+        **({"sha": sha} if sha else {}),
+    }).encode()
+    url = f"https://api.github.com/repos/{_GITHUB_REPO}/contents/{repo_path}"
+    req = urllib.request.Request(url, data=body, method="PUT", headers={
+        "Authorization": f"token {_GITHUB_TOKEN}",
+        "Content-Type": "application/json",
+        "Accept": "application/vnd.github.v3+json",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            new_sha = json.loads(resp.read())["content"]["sha"]
+            print(f"  [GitHub] pushed → {repo_path} (sha {new_sha[:7]})", flush=True)
+            return new_sha
+    except Exception as e:
+        print(f"  [GitHub] push failed ({e}); result not persisted remotely.", flush=True)
+        return sha
 
 if os.getenv("SMOKE", "0") == "1":
     CONFIG.update({
@@ -464,6 +519,9 @@ class LoRADPTrainer:
         else:
             trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
             print(f"  Full fine-tuning: {trainable:,} trainable parameters")
+            if CONFIG["gradient_checkpointing"]:
+                model.gradient_checkpointing_enable()
+                print(f"  Gradient checkpointing: enabled")
 
         return model
 
@@ -1086,13 +1144,23 @@ def run_noise_sweep_experiment():
     print("=" * 60)
 
     results_path = os.path.join(CONFIG["output_dir"], "table_11_results.json")
+    # GitHub path mirrors the local OUTPUT_DIR path relative to WORKDIR root.
+    _gh_repo_path = os.path.join(CONFIG["output_dir"], "table_11_results.json")
     results = []
     completed = {}
-    if os.path.exists(results_path):
+    _gh_sha = None
+    # Try GitHub first (works even when /home is full), then fall back to local file.
+    if _GITHUB_TOKEN:
+        results, _gh_sha = _github_fetch_results(_gh_repo_path)
+        if results:
+            print(f"\nResuming from GitHub: {len(results)} sigma level(s) already complete.")
+    if not results and os.path.exists(results_path):
         with open(results_path) as f:
             results = json.load(f)
-        completed = {r["noise"]: r for r in results}
-        print(f"\nResuming: {len(completed)} noise level(s) already complete: {sorted(completed)}")
+        print(f"\nResuming from local file: {len(results)} sigma level(s) already complete.")
+    completed = {r["noise"]: r for r in results}
+    if completed:
+        print(f"  Completed σ: {sorted(completed)}")
 
     print("\n[Step 1] Loading and processing ENRON email data...")
     processor = EnronDataProcessor(CONFIG["data_dir"])
@@ -1123,7 +1191,8 @@ def run_noise_sweep_experiment():
             print("  Skipping (already complete)")
             continue
 
-        checkpoint_dir = os.path.join(CONFIG["output_dir"], f"model_checkpoint_sigma_{noise}")
+        _ckpt_base = _CHECKPOINT_DIR if _CHECKPOINT_DIR else CONFIG["output_dir"]
+        checkpoint_dir = os.path.join(_ckpt_base, f"model_checkpoint_sigma_{noise}")
         if os.path.exists(checkpoint_dir):
             model = trainer.load_checkpoint(checkpoint_dir)
         else:
@@ -1142,8 +1211,9 @@ def run_noise_sweep_experiment():
         perplexity = float(np.exp(val_loss))
         print(f"  Val loss: {val_loss:.4f}  Perplexity: {perplexity:.2f}")
 
+        _pred_base = _CHECKPOINT_DIR if _CHECKPOINT_DIR else CONFIG["output_dir"]
         if CONFIG["dp_attack_type"] == "composite":
-            pred_dir = os.path.join(CONFIG["output_dir"], "predictions", f"sigma_{noise}")
+            pred_dir = os.path.join(_pred_base, "predictions", f"sigma_{noise}")
             os.makedirs(pred_dir, exist_ok=True)
             attack_rate, correctness, num_hits = attacker.run_composite_attack(
                 model, attack_pairs, COMPOSITE_ATTACK_TYPES,
@@ -1151,7 +1221,7 @@ def run_noise_sweep_experiment():
                 email_freq=email_freq,
             )
         else:
-            predictions_path = os.path.join(CONFIG["output_dir"], "predictions", f"sigma_{noise}.json")
+            predictions_path = os.path.join(_pred_base, "predictions", f"sigma_{noise}.json")
             attack_rate, correctness, num_hits = attacker.run_attack(
                 model, attack_pairs, CONFIG["dp_attack_type"],
                 predictions_path=predictions_path,
@@ -1173,9 +1243,13 @@ def run_noise_sweep_experiment():
         })
         results.sort(key=lambda r: r["noise"])
 
-        with open(results_path, "w") as f:
-            json.dump(results, f, indent=2)
-        print(f"  Results checkpoint → {results_path}")
+        try:
+            with open(results_path, "w") as f:
+                json.dump(results, f, indent=2)
+            print(f"  Results checkpoint → {results_path}")
+        except OSError as e:
+            print(f"  WARNING: could not write local results ({e}); relying on GitHub.")
+        _gh_sha = _github_push_results(results, _gh_repo_path, _gh_sha)
         print(f"  Attack success: {attack_rate:.2f}% ({num_hits} hits)")
         print(f"  Privacy enhancement: {privacy_enhancement:.0f}%")
         print(f"  Correctness:    {correctness:.1f}%")
