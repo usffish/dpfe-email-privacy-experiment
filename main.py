@@ -184,10 +184,11 @@ if CONFIG["dp_noise_levels"] and CONFIG["dp_attack_type"] not in ATTACK_CONFIGS 
     )
 
 # GitHub-backed persistence for results JSON (bypasses full /home filesystem).
-# Set GITHUB_TOKEN + GITHUB_REPO in the sbatch script; set CHECKPOINT_DIR to
-# a /tmp path so model checkpoints never touch /home.
-_GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
-_GITHUB_REPO  = os.getenv("GITHUB_REPO", "usffish/attack")
+# Set GITHUB_TOKEN + GITHUB_REPO + GITHUB_BRANCH in the sbatch script; set
+# CHECKPOINT_DIR to a /tmp path so model checkpoints never touch /home.
+_GITHUB_TOKEN  = os.getenv("GITHUB_TOKEN", "")
+_GITHUB_REPO   = os.getenv("GITHUB_REPO", "usffish/dpfe-email-privacy-experiment")
+_GITHUB_BRANCH = os.getenv("GITHUB_BRANCH", "attack")
 _CHECKPOINT_DIR = os.getenv("CHECKPOINT_DIR", "")  # if set, checkpoints go here instead of OUTPUT_DIR
 
 
@@ -196,7 +197,7 @@ def _github_fetch_results(repo_path):
     if not _GITHUB_TOKEN:
         return [], None
     import urllib.request, base64 as _b64
-    url = f"https://api.github.com/repos/{_GITHUB_REPO}/contents/{repo_path}"
+    url = f"https://api.github.com/repos/{_GITHUB_REPO}/contents/{repo_path}?ref={_GITHUB_BRANCH}"
     req = urllib.request.Request(url, headers={
         "Authorization": f"token {_GITHUB_TOKEN}",
         "Accept": "application/vnd.github.v3+json",
@@ -220,6 +221,7 @@ def _github_push_results(results, repo_path, sha=None):
     body = json.dumps({
         "message": f"[auto] sweep update: {repo_path}",
         "content": content,
+        "branch": _GITHUB_BRANCH,
         **({"sha": sha} if sha else {}),
     }).encode()
     url = f"https://api.github.com/repos/{_GITHUB_REPO}/contents/{repo_path}"
