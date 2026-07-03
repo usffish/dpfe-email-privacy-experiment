@@ -241,8 +241,8 @@ def _github_push_results(results, repo_path, sha=None):
 
 if os.getenv("SMOKE", "0") == "1":
     CONFIG.update({
-        "max_emails":   3000,
-        "subset_pairs": 200,
+        "max_emails":   500,
+        "subset_pairs": 50,
         "epochs":       1,
         "max_length":   64,
         "output_dir":   os.path.join(CONFIG["output_dir"], "smoke"),

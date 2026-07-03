@@ -4,7 +4,7 @@
 # to /tmp, train + attack at sigma 0 and 0.1, and PUSH results to GitHub.
 # The token is read from the environment (never hardcoded); inject it at run:
 #   ssh circe "srun -p muma_2021 --qos=muma21 --gres=gpu:1 --cpus-per-task=2 \
-#     --mem=16G --time=01:30:00 --export=ALL,GITHUB_TOKEN=<tok> bash -s" \
+#     --mem=16G --time=02:00:00 --export=ALL,GITHUB_TOKEN=<tok> bash -s" \
 #     < slurm/smoke_workaround.sh
 set -e
 set -o pipefail
