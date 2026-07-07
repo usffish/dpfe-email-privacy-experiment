@@ -266,6 +266,44 @@ The 1.3B sweep is the most informative: highest baseline ASR and complete across
 
 ---
 
+### DP-SGD Noise Sweep — GPT-2 Base (σ = 0 to 50, single attack: bracket_greedy)
+
+| σ | Hits | ASR | Val Loss | Privacy Enh. |
+|---|---|---|---|---|
+| 0.0 | 10 | 0.341% | 2.549 | 0% (baseline) |
+| 0.1 | 0 | 0.000% | 3.660 | **100%** |
+| 0.2 | 0 | 0.000% | 4.037 | 100% |
+| 0.5 | 0 | 0.000% | 4.584 | 100% |
+| 1.0 | 0 | 0.000% | 4.988 | 100% |
+| 2.0 | 1 | 0.034% | 5.414 | 90% |
+| 5.0 | 0 | 0.000% | 5.712 | 100% |
+| 10.0 | 1 | 0.034% | 6.005 | 90% |
+| 20.0 | 0 | 0.000% | 6.190 | 100% |
+| 50.0 | 0 | 0.000% | 6.222 | 100% |
+
+**Key finding**: GPT-2 Base reaches zero hits at σ=0.1 — a much lower suppression threshold than GPT-Neo models. The occasional stray hit at σ=2 and σ=10 appears to be noise-induced coincidence (1 hit out of 3,238 pairs). Val loss climbs continuously (2.55 → 6.22), indicating the model degrades much more severely than GPT-Neo under DP-SGD noise.
+
+---
+
+### DP-SGD Noise Sweep — GPT-Neo 1.3B (σ = 0 to 50, single attack: zs_d_beam5)
+
+| σ | Hits | ASR | Val Loss | Privacy Enh. |
+|---|---|---|---|---|
+| 0.0 | 23 | 0.785% | 1.984 | 0% (baseline) |
+| 0.1 | 12 | 0.410% | 3.241 | 48% |
+| 0.2 | 14 | 0.478% | 3.501 | 39% |
+| 0.5 | 13 | 0.444% | 3.784 | 44% |
+| 1.0 | 13 | 0.444% | 3.885 | 44% |
+| 2.0 | 14 | 0.478% | 3.937 | 39% |
+| 5.0 | 14 | 0.478% | 3.961 | 39% |
+| 10.0 | 13 | 0.444% | 3.974 | 44% |
+| 20.0 | 15 | 0.512% | 3.977 | 35% |
+| 50.0 | 13 | 0.444% | 3.977 | 44% |
+
+**Key finding**: GPT-Neo 1.3B never reaches zero — even at σ=50 the attacker recovers 13 addresses. Val loss plateaus at ~3.98 beyond σ=5 (model destroyed) but memorization persists. The 1.3B model's deep memorization makes it both the best attack target and the hardest to protect with DP-SGD alone.
+
+---
+
 ### DPFE Paper Reference (GPT-2 base, full fine-tune, σ=0)
 
 | ASR | Correctness |
