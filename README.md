@@ -67,12 +67,12 @@ Include explicitly with `ATTACK_TYPES=context_50,context_100,context_200`.
 
 ## Models
 
-| Model | Parameters | HPO Study | Best Val Loss | sbatch |
-|---|---|---|---|---|
-| GPT-Neo 125M | 125M | `gpt-neo-hpo-v3` | 2.2322 | `slurm/run_attacks.sbatch` |
-| GPT-Neo 1.3B | 1.3B | `gpt-neo-1.3b-hpo-512` (Trial #36) | 1.6868 | `slurm/run_attacks_1.3b.sbatch` |
-| GPT-2 Base | 117M | `gpt2-base-hpo-v1` (Trial #36) | 2.3565 | `slurm/run_composite_sweep_gpt2_base.sbatch` |
-| GPT-2 Large | 774M | `gpt2-large-hpo-v2` (Trial #32) | 2.1984 | `slurm/run_composite_sweep_gpt2_large.sbatch` |
+| Model | Parameters | HPO Study | Best Val Loss | Attack sbatch | Sweep sbatch |
+|---|---|---|---|---|---|
+| GPT-Neo 125M | 125M | `gpt-neo-hpo-v3` | 2.2322 | `slurm/run_attacks.sbatch` | `slurm/run_composite_sweep.sbatch` |
+| GPT-Neo 1.3B | 1.3B | `gpt-neo-1.3b-hpo-512` (Trial #36) | 1.6868 | `slurm/run_attacks_1.3b.sbatch` | `slurm/run_composite_sweep_1.3b.sbatch` |
+| GPT-2 Base | 117M | `gpt2-base-hpo-v1` (Trial #36) | 2.3565 | `slurm/run_attacks_gpt2_base.sbatch` | `slurm/run_composite_sweep_gpt2_base.sbatch` |
+| GPT-2 Large | 774M | `gpt2-large-hpo-v2` (Trial #32) | 2.1984 | `slurm/run_attacks_gpt2_large.sbatch` | `slurm/run_composite_sweep_gpt2_large.sbatch` |
 
 ---
 
@@ -143,16 +143,14 @@ The model is trained as a **general email language model** (next-token predictio
 
 ### Cross-Model Attack Comparison (best single attack per model, σ=0)
 
-| Model | Best Attack | Hits | ASR | Notes |
+| Model | Parameters | Best Attack | Hits | ASR |
 |---|---|---|---|---|
-| **GPT-Neo 1.3B** | **zs_d_beam5** | **23** | **0.785%** | Best overall |
-| GPT-Neo 1.3B | zs_d_greedy | 18 | 0.614% | |
-| GPT-Neo 1.3B | bracket_greedy | 14 | 0.478% | |
-| GPT-2 Base | bracket_greedy | 9 | 0.307% | |
-| GPT-Neo 125M | bracket_greedy | 6 | 0.205% | |
-| GPT-2 Large | all attacks | 0 | 0% | Undertrained or config issue |
+| **GPT-Neo 1.3B** | 1.3B | **zs_d_beam5** | **23** | **0.785%** |
+| GPT-2 Large | 774M | bracket_greedy | 10 | 0.341% |
+| GPT-2 Base | 117M | bracket_greedy | 9 | 0.307% |
+| GPT-Neo 125M | 125M | bracket_greedy | 6 | 0.205% |
 
-**Key finding**: Model size matters — GPT-Neo 1.3B recovers nearly 4× as many addresses as GPT-Neo 125M with the best attack. GPT-2 Large (774M) produced 0 hits despite being larger than 125M, likely due to suboptimal HPO config.
+**Key finding**: GPT-Neo 1.3B dominates — it recovers nearly 4× as many addresses as the next best model. The GPT-2 family (Base and Large) performs comparably to GPT-Neo 125M despite different architectures, suggesting model size within the GPT-Neo family matters more than raw parameter count across families.
 
 ---
 
@@ -195,24 +193,74 @@ Union across all 15 attacks: **15 unique addresses recovered**.
 
 ---
 
-### DP-SGD Noise Sweep — GPT-Neo 125M (σ = 0 to 50, composite attack)
+### DP-SGD Noise Sweep — GPT-Neo 125M (σ = 0 to 0.1, composite attack)
 
-Extended sweep using a composite adversary (union of 6 attack types). Val loss tracked to measure model degradation.
+Early sweep using composite adversary (union of 6 attack types) at small σ values.
 
-| σ | Hits | ASR | Val Loss | Perplexity | Privacy Enh. |
-|---|---|---|---|---|---|
-| 0.0 | 15 | 0.512% | 2.488 | 12.0 | 0% (baseline) |
-| 0.1 | 5 | 0.171% | 3.311 | 27.4 | 67% |
-| 0.2 | 6 | 0.205% | 3.471 | 32.2 | 60% |
-| 0.5 | 7 | 0.239% | 3.654 | 38.6 | 53% |
-| 1.0 | 7 | 0.239% | 3.769 | 43.3 | 53% |
-| 2.0 | 5 | 0.171% | 3.852 | 47.1 | 67% |
-| 5.0 | 8 | 0.273% | 3.923 | 50.5 | 47% |
-| 10.0 | 6 | 0.205% | 3.958 | 52.3 | 60% |
-| 20.0 | 8 | 0.273% | 3.971 | 53.0 | 47% |
-| 50.0 | 6 | 0.205% | 3.956 | 52.3 | 60% |
+| σ | Hits | ASR | Privacy Enh. |
+|---|---|---|---|
+| 0.0 | 17 | 0.580% | 0% (baseline) |
+| 0.0001 | 9 | 0.307% | 47% |
+| 0.0005 | 6 | 0.205% | 65% |
+| 0.002 | 8 | 0.273% | 53% |
+| 0.005 | 7 | 0.239% | 59% |
+| 0.01 | 5 | 0.171% | 71% |
+| 0.05 | 6 | 0.205% | 65% |
+| 0.1 | 4 | 0.137% | 76% |
 
-**Key finding**: No zero-hit noise level exists within σ = 0–50. Val loss plateaus at ~3.97 beyond σ = 5 (model fully degraded, perplexity ~52), yet the composite attacker still recovers 5–8 addresses at every noise level. Some addresses are so deeply memorized that DP-SGD noise alone cannot suppress extraction, even when the model's language modeling ability is essentially destroyed. The non-monotone pattern (σ=5 recovers more than σ=1) suggests stochastic noise sometimes helps rather than hurts extraction.
+Full σ=0–50 sweep running (jobs 33363357). Results will be updated here when complete.
+
+---
+
+### GPT-2 Base — Full Attack Results (σ=0, 3,238 pairs)
+
+| Rank | Attack Type | Hits | ASR |
+|---|---|---|---|
+| 1 | **bracket_greedy** | **9** | **0.307%** |
+| 2 | json_greedy | 6 | 0.205% |
+| 3 | zs_b_greedy | 5 | 0.171% |
+| 4 | zs_d_greedy | 4 | 0.137% |
+| 4 | zs_d_beam5 | 4 | 0.137% |
+| 6 | zs_d_topk | 3 | 0.102% |
+| 7 | domain_hint_greedy | 1 | 0.034% |
+| 8–15 | zs_a/c_greedy, fs_* | 0 | 0% |
+
+---
+
+### GPT-2 Large — Full Attack Results (σ=0, 3,238 pairs)
+
+| Rank | Attack Type | Hits | ASR |
+|---|---|---|---|
+| 1 | **bracket_greedy** | **10** | **0.341%** |
+| 2 | json_greedy | 6 | 0.205% |
+| 3 | zs_d_greedy | 4 | 0.137% |
+| 4 | zs_a_greedy | 3 | 0.102% |
+| 4 | zs_d_beam5 | 3 | 0.102% |
+| 6 | zs_d_topk | 2 | 0.068% |
+| 7 | zs_b_greedy | 1 | 0.034% |
+| 7 | zs_c_greedy | 1 | 0.034% |
+| 9–15 | domain_hint_greedy, fs_* | 0 | 0% |
+
+---
+
+### DP-SGD Noise Sweep — GPT-Neo 1.3B (σ = 0 to 50, composite attack)
+
+The 1.3B sweep is the most informative: highest baseline ASR and complete across all 10 noise levels. Composite attack unions 6 attack types per σ level.
+
+| σ | Hits | ASR | Privacy Enh. |
+|---|---|---|---|
+| 0.0 | 58 | 1.980% | 0% (baseline) |
+| 0.1 | 29 | 0.990% | 50% |
+| 0.2 | 29 | 0.990% | 50% |
+| 0.5 | 29 | 0.990% | 50% |
+| 1.0 | 27 | 0.922% | 53% |
+| 2.0 | 27 | 0.922% | 53% |
+| 5.0 | 30 | 1.024% | −3% |
+| 10.0 | 26 | 0.887% | 55% |
+| 20.0 | 28 | 0.956% | 52% |
+| 50.0 | 25 | 0.853% | 57% |
+
+**Key finding**: Even at σ=50, the composite attacker recovers 25 addresses (0.853% ASR). DP-SGD noise suppresses leakage by roughly 50% but never reaches zero. This confirms that some addresses are so deeply memorized that gradient noise alone cannot prevent extraction.
 
 ---
 
