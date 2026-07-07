@@ -193,22 +193,24 @@ Union across all 15 attacks: **15 unique addresses recovered**.
 
 ---
 
-### DP-SGD Noise Sweep — GPT-Neo 125M (σ = 0 to 0.1, composite attack)
+### DP-SGD Noise Sweep — GPT-Neo 125M (σ = 0 to 50, composite attack)
 
-Early sweep using composite adversary (union of 6 attack types) at small σ values.
+Composite adversary (union of 6 attack types). Val loss and perplexity track model degradation.
 
-| σ | Hits | ASR | Privacy Enh. |
-|---|---|---|---|
-| 0.0 | 17 | 0.580% | 0% (baseline) |
-| 0.0001 | 9 | 0.307% | 47% |
-| 0.0005 | 6 | 0.205% | 65% |
-| 0.002 | 8 | 0.273% | 53% |
-| 0.005 | 7 | 0.239% | 59% |
-| 0.01 | 5 | 0.171% | 71% |
-| 0.05 | 6 | 0.205% | 65% |
-| 0.1 | 4 | 0.137% | 76% |
+| σ | Hits | ASR | Val Loss | Perplexity | Privacy Enh. |
+|---|---|---|---|---|---|
+| 0.0 | 15 | 0.512% | 2.49 | 12.0 | 0% (baseline) |
+| 0.1 | 5 | 0.171% | 3.31 | 27.4 | 67% |
+| 0.2 | 6 | 0.205% | 3.47 | 32.2 | 60% |
+| 0.5 | 7 | 0.239% | 3.65 | 38.6 | 53% |
+| 1.0 | 7 | 0.239% | 3.77 | 43.3 | 53% |
+| 2.0 | 5 | 0.171% | 3.85 | 47.1 | 67% |
+| 5.0 | 8 | 0.273% | 3.92 | 50.5 | 47% |
+| 10.0 | 6 | 0.205% | 3.96 | 52.3 | 60% |
+| 20.0 | 8 | 0.273% | 3.97 | 53.0 | 47% |
+| 50.0 | 6 | 0.205% | 3.96 | 52.3 | 60% |
 
-Full σ=0–50 sweep running (jobs 33363357). Results will be updated here when complete.
+**Key finding**: No zero-hit noise level exists within σ=0–50. Val loss plateaus at ~3.97 beyond σ=5 (model fully degraded, perplexity ~52), yet the composite attacker still recovers 5–8 addresses at every noise level. The non-monotone pattern (σ=5 recovers more than σ=1) suggests stochastic noise occasionally aids extraction.
 
 ---
 
