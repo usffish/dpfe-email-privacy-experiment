@@ -16,11 +16,11 @@ So this branch fixes the privacy noise at zero (σ=0) and instead varies the **a
 
 ---
 
-## What is GPT-2?
+## What is GPT-Neo-125M?
 
-GPT-2 is a language model made by OpenAI. A language model is a program trained to predict what word comes next in a sentence. It learned this by reading hundreds of gigabytes of text from the internet, which made it very good at generating human-sounding text.
+GPT-Neo-125M is a language model made by EleutherAI (125 million parameters). A language model is a program trained to predict what word comes next in a sentence. It learned this by reading hundreds of gigabytes of text from the internet, which made it very good at generating human-sounding text.
 
-This branch uses **GPT-2 base (117M parameters)** by default, but the code also runs **EleutherAI/gpt-neo-125M** without any code changes — only `MODEL_NAME` needs to change. Both are "causal language models": they generate text one token at a time, each token predicted from everything before it.
+This branch uses **EleutherAI/gpt-neo-125M** as its primary model. It also supports **GPT-Neo-1.3B** (1.3 billion parameters), **GPT-2 Base** (117M, OpenAI), and **GPT-2 Large** (774M, OpenAI) — switching between them only requires changing the `MODEL_NAME` environment variable. All are "causal language models": they generate text one token at a time, each token predicted from everything before it.
 
 ---
 
@@ -38,9 +38,9 @@ thousands of times. The attacks in this experiment exploit this by prompting the
 
 ## Full Fine-Tuning vs. LoRA
 
-The `circe` branch used **LoRA** (Low-Rank Adaptation) — freezing the original 117M GPT-2 weights and training only ~3M small "adapter" matrices alongside them, because the 8 GB GPU couldn't hold gradients for all 117M parameters.
+The `circe` branch used **LoRA** (Low-Rank Adaptation) — freezing the original base weights and training only ~3M small "adapter" matrices alongside them, because the 8 GB GPU couldn't hold gradients for all parameters.
 
-This `attack` branch runs on CIRCE's `muma_2021` partition, which has **RTX 6000 GPUs (24 GB VRAM)** — enough to **fully fine-tune** all 117M (GPT-2) or 125M (GPT-Neo) parameters directly. Full fine-tuning memorizes more of the training data than LoRA, which matters here because the whole point of this branch is to study a model that *has* memorized.
+This `attack` branch runs on CIRCE's `muma_2021` partition, which has **RTX 6000 GPUs (24 GB VRAM)** — enough to **fully fine-tune** all 125M (GPT-Neo-125M) parameters directly. Full fine-tuning memorizes more of the training data than LoRA, which matters here because the whole point of this branch is to study a model that *has* memorized.
 
 The code still supports LoRA (`USE_LORA=1`) as a fallback for tighter VRAM budgets, but the default is `USE_LORA=0` (full fine-tuning).
 
@@ -143,7 +143,7 @@ CONFIG = {
 
 `os.getenv("MODEL_NAME", "gpt2")` means: "look for an environment variable called `MODEL_NAME`; if it exists use that value, otherwise use the default `gpt2`." This is how the same code runs GPT-2 vs. GPT-Neo, LoRA vs. full fine-tuning, and different hyperparameters — all without changing a line of Python, just by changing the SLURM `.sbatch` file.
 
-Key settings (current production defaults, from the `gpt-neo-hpo-v3` sweep — see README):
+Key settings (current production defaults for GPT-Neo-125M, from the `gpt-neo-hpo-v3` sweep — see README):
 
 | Setting | Value | Meaning |
 |---|---|---|
@@ -161,7 +161,7 @@ Key settings (current production defaults, from the `gpt-neo-hpo-v3` sweep — s
 Two special flags override CONFIG when set to `1`:
 
 - **`FRESH=1`** — deletes the output directory before starting, for a clean run.
-- **`SMOKE=1`** — shrinks everything (3,000 emails, 200 pairs, 1 epoch, 64-token sequences, only 2 attack types) for a ~15 minute end-to-end sanity check. Results go to a separate `smoke/` subfolder.
+- **`SMOKE=1`** — shrinks everything (500 emails, 50 pairs, 1 epoch, 64-token sequences, only 2 attack types) for a fast end-to-end sanity check (~10–15 min with GPU). Results go to a separate `smoke/` subfolder.
 
 ---
 
@@ -403,7 +403,7 @@ to a bigger trainable set.
 ### The sweep loop
 
 ```python
-for noise in CONFIG["dp_noise_levels"]:        # v3 sweep: 0, 0.0001, 0.0005, 0.002, 0.005, 0.01, 0.05
+for noise in CONFIG["dp_noise_levels"]:        # production sweep: 0, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0
     if noise in completed:
         continue                                # resume support
     model = trainer.train(..., noise_multiplier=noise)   # fresh full fine-tune
@@ -495,17 +495,17 @@ should be.
 
 ## Common Questions Your Professor Might Ask
 
-**Q: Why does this branch drop differential privacy entirely?**
+**Q: Why does this branch drop differential privacy entirely (by default)?**
 
-The `circe` branch already answers "how does DP noise affect leakage?" This branch holds privacy fixed at its weakest setting (σ=0 — maximum memorization) and instead varies the *attack method*, to answer "given a model that has memorized, which extraction strategy works best?" Mixing both variables (noise level × attack type = 5 × 15 = 75 conditions) would be too expensive to run and harder to interpret.
+The `circe` branch already answers "how does DP noise affect leakage?" This branch holds privacy fixed at its weakest setting (σ=0 — maximum memorization) and instead varies the *attack method*, to answer "given a model that has memorized, which extraction strategy works best?" Mixing both variables (noise level × attack type = 10 × 15 = 150 conditions) would be too expensive to run and harder to interpret. An optional noise sweep (`DP_NOISE_LEVELS`) covers σ=0 to σ=50.
 
 **Q: Why full fine-tuning instead of LoRA, if LoRA worked on the `circe` branch?**
 
-Two reasons. First, the RTX 6000 (24 GB) on `muma_2021` has enough memory to fully fine-tune a 117–125M model, unlike the 8 GB GTX 1070 Ti used by `circe`. Second, full fine-tuning memorizes training data more thoroughly than LoRA (which only updates ~2.5% of parameters) — and this experiment specifically wants a *strongly memorizing* model so the 15 attacks have something to find.
+Two reasons. First, the RTX 6000 (24 GB) on `muma_2021` has enough memory to fully fine-tune a 125M model, unlike the 8 GB GTX 1070 Ti used by `circe`. Second, full fine-tuning memorizes training data more thoroughly than LoRA (which only updates ~2.5% of parameters) — and this experiment specifically wants a *strongly memorizing* model so the 15 attacks have something to find.
 
-**Q: How was `learning_rate=9.82e-05`, `max_grad_norm=4.63`, etc. chosen?**
+**Q: How was `learning_rate=1.32e-05`, `max_grad_norm=2.78`, etc. chosen?**
 
-Via a BOHB (Bayesian Optimization + HyperBand) hyperparameter search using Optuna (`hpo_trial.py`), minimizing validation loss across ~24 trials (`attack-hpo-v4`). See the README for the full search space and results table.
+Via a BOHB (Bayesian Optimization + HyperBand) hyperparameter search using Optuna (`hpo_trial.py`), minimizing validation loss across ~40 trials (`gpt-neo-hpo-v3`). See the README for the full search space and results table.
 
 **Q: Why is validation loss the HPO objective instead of attack success rate?**
 
@@ -525,7 +525,7 @@ They give the model a head start: the last 50/100/200 tokens of a *real training
 
 **Q: What are the `FRESH` and `SMOKE` flags?**
 
-`FRESH=1` deletes all previous results before starting — a guaranteed clean run after a code change. `SMOKE=1` runs a tiny version (3,000 emails, 200 pairs, 1 epoch, 64-token sequences, 2 attack types) in ~15 minutes, writing to a separate `smoke/` folder so it never overwrites real results. Run a smoke test after any code change to catch bugs before committing to a multi-hour SLURM job.
+`FRESH=1` deletes all previous results before starting — a guaranteed clean run after a code change. `SMOKE=1` runs a tiny version (500 emails, 50 pairs, 1 epoch, 64-token sequences, 2 attack types) in ~10–15 minutes on GPU, writing to a separate `smoke/` folder so it never overwrites real results. Run a smoke test after any code change to catch bugs before committing to a multi-hour SLURM job.
 
 **Q: Why train only once instead of 5 times like the `circe` branch?**
 
