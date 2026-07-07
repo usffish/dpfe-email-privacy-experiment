@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=dpfe-attacks-1.3b
-#SBATCH --output=/home/i/ismailj/dpfe-email-privacy-experiment/logs/%j.out
-#SBATCH --error=/home/i/ismailj/dpfe-email-privacy-experiment/logs/%j.err
+#SBATCH --output=/work_bgfs/i/ismailj/logs/%j.out
+#SBATCH --error=/work_bgfs/i/ismailj/logs/%j.err
 #SBATCH --partition=muma_2021
 #SBATCH --qos=muma21
 #SBATCH --gres=gpu:1
@@ -14,12 +14,13 @@
 # Multi-attack-type experiment for GPT-Neo-1.3B — no DP noise.
 # Trains once using gpt-neo-1.3b-hpo-512 best config (Trial #36, val_loss=1.6868),
 # then runs all 15 attack strategies to compare effectiveness.
-# 48h limit (vs 36h for 125M) to account for larger model and smaller batch size.
+# Submit from: /work_bgfs/i/ismailj/dpfe-email-privacy-experiment
+#   sbatch slurm/run_attacks_1.3b.sbatch
 
 REAL_HOME=/home/i/ismailj
-WORKDIR=${REAL_HOME}/dpfe-email-privacy-experiment
+WORKDIR=/work_bgfs/i/ismailj/dpfe-email-privacy-experiment
 
-export HF_HOME=${REAL_HOME}/hf_cache
+export HF_HOME=/work_bgfs/i/ismailj/hf_cache
 export TRANSFORMERS_OFFLINE=1
 export TOKENIZERS_PARALLELISM=false
 export PYTHONUNBUFFERED=1
@@ -55,7 +56,6 @@ echo "Node:   ${SLURMD_NODENAME}"
 echo "GPU:    $(nvidia-smi --query-gpu=name --format=csv,noheader)"
 echo "Start:  $(date)"
 
-mkdir -p "${WORKDIR}/logs"
 cd "${WORKDIR}"
 python -u main.py
 

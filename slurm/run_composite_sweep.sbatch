@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=dpfe-composite-sweep
-#SBATCH --output=/home/i/ismailj/dpfe-email-privacy-experiment/logs/%j.out
-#SBATCH --error=/home/i/ismailj/dpfe-email-privacy-experiment/logs/%j.err
+#SBATCH --output=/work_bgfs/i/ismailj/logs/%j.out
+#SBATCH --error=/work_bgfs/i/ismailj/logs/%j.err
 #SBATCH --partition=muma_2021
 #SBATCH --qos=muma21
 #SBATCH --gres=gpu:1
@@ -11,44 +11,44 @@
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=ismailj@usf.edu
 
-# Composite-attack DP-SGD noise sweep.
-# At each sigma level, trains one full fine-tune (v3 config) then runs the 6
-# attack types that collectively cover all 15 uniquely recoverable addresses
-# (bracket_greedy, zs_b_greedy, zs_d_greedy, zs_d_topk, json_greedy, zs_a_greedy)
-# and unions the hits. This gives the highest possible attack success rate at
-# each noise level — a stronger adversary than any single attack type.
-# Time budget doubled vs single-attack sweep (6x more attack passes per sigma).
+# Composite-attack DP-SGD noise sweep — GPT-Neo-125M.
+# At each sigma level, trains one full fine-tune then runs 6 attack types and
+# unions the hits for the highest possible ASR at each noise level.
+# Submit from: /work_bgfs/i/ismailj/dpfe-email-privacy-experiment
+#   sbatch slurm/run_composite_sweep.sbatch
 
 REAL_HOME=/home/i/ismailj
-WORKDIR=${REAL_HOME}/dpfe-email-privacy-experiment
+WORKDIR=/work_bgfs/i/ismailj/dpfe-email-privacy-experiment
 
-export HF_HOME=${REAL_HOME}/hf_cache
+export HF_HOME=/work_bgfs/i/ismailj/hf_cache
 export TRANSFORMERS_OFFLINE=1
 export TOKENIZERS_PARALLELISM=false
 export PYTHONUNBUFFERED=1
 
 export FRESH=0
 export SMOKE=0
-export GRAD_ACCUM_STEPS=2
-# gpt-neo-hpo-v3 best config
+
+# gpt-neo-hpo-v3 best config (trial #0, val_loss=2.2322) — see README
 export LEARNING_RATE=1.32e-05
 export LR_SCHEDULE=linear
 export WEIGHT_DECAY=0.0729
 export WARMUP_FRACTION=0.0166
+export GRAD_ACCUM_STEPS=2
+export MAX_GRAD_NORM=2.78
 export ATTACK_BATCH_SIZE=32
 export USE_LORA=0
 export MODEL_NAME=EleutherAI/gpt-neo-125M
-export OUTPUT_DIR=results/gpt-neo-125m-v3-zs-d-greedy-sweep
+export OUTPUT_DIR=results/gpt-neo-125m-v3-composite-sweep
 export MAX_EMAILS=50000
 export EPOCHS=3
 export SUBSET_PAIRS=3238
 export MAX_NEW_TOKENS=100
 export BATCH_SIZE=32
 export MAX_LENGTH=512
-export MAX_GRAD_NORM=2.78
 
 export DP_NOISE_LEVELS=0,0.1,0.2,0.5,1.0,2.0,5.0,10.0,20.0,50.0
-export DP_ATTACK_TYPE=zs_d_greedy
+export DP_ATTACK_TYPE=composite
+export COMPOSITE_ATTACK_TYPES=bracket_greedy,zs_b_greedy,zs_d_greedy,zs_d_topk,json_greedy,zs_a_greedy
 
 source ${REAL_HOME}/miniconda3/etc/profile.d/conda.sh
 conda activate my_environment
@@ -58,7 +58,6 @@ echo "Node:   ${SLURMD_NODENAME}"
 echo "GPU:    $(nvidia-smi --query-gpu=name --format=csv,noheader)"
 echo "Start:  $(date)"
 
-mkdir -p "${WORKDIR}/logs"
 cd "${WORKDIR}"
 python -u main.py
 

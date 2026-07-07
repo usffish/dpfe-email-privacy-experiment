@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=dpfe-comp-gpt2l
+#SBATCH --job-name=dpfe-attacks-gpt2b
 #SBATCH --output=/work_bgfs/i/ismailj/logs/%j.out
 #SBATCH --error=/work_bgfs/i/ismailj/logs/%j.err
 #SBATCH --partition=muma_2021
@@ -7,14 +7,15 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64G
-#SBATCH --time=120:00:00
+#SBATCH --time=24:00:00
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=ismailj@usf.edu
 
-# Composite-attack DP-SGD noise sweep for GPT-2 Large (774M).
-# Unions hits across bracket_greedy and json_greedy at each sigma level.
+# Multi-attack-type experiment for GPT-2 Base (117M) — no DP noise.
+# Trains once using gpt2-base-hpo-v1 best config (Trial #36, val_loss=2.3565),
+# then runs all 15 attack strategies to compare effectiveness.
 # Submit from: /work_bgfs/i/ismailj/dpfe-email-privacy-experiment
-#   sbatch slurm/run_composite_sweep_gpt2_large.sbatch
+#   sbatch slurm/run_attacks_gpt2_base.sbatch
 
 REAL_HOME=/home/i/ismailj
 WORKDIR=/work_bgfs/i/ismailj/dpfe-email-privacy-experiment
@@ -27,28 +28,25 @@ export PYTHONUNBUFFERED=1
 export FRESH=0
 export SMOKE=0
 
-# gpt2-large-hpo-v2 best config (Trial #32, val_loss=2.1984)
-export LEARNING_RATE=9.024263343579973e-06
+# gpt2-base-hpo-v1 best config (Trial #36, val_loss=2.3565)
+export LEARNING_RATE=0.0002304276211390074
 export LR_SCHEDULE=cosine
-export WEIGHT_DECAY=0.057443059201871274
-export WARMUP_FRACTION=0.05337337560305046
-export MAX_GRAD_NORM=1.4497073847836068
-export GRAD_ACCUM_STEPS=2
+export WEIGHT_DECAY=0.031225656699132093
+export WARMUP_FRACTION=0.01092414683449043
+export MAX_GRAD_NORM=0.4230167343685974
+export GRAD_ACCUM_STEPS=4
 
 export USE_LORA=0
-export MODEL_NAME=gpt2-large
-export OUTPUT_DIR=results/gpt2-large-composite-sweep
+export MODEL_NAME=gpt2
+export OUTPUT_DIR=results/gpt2-base-attacks
 export MAX_EMAILS=50000
 export EPOCHS=3
 export SUBSET_PAIRS=3238
 export MAX_NEW_TOKENS=100
-export BATCH_SIZE=4
-export MAX_LENGTH=256
-export ATTACK_BATCH_SIZE=16
-
-export DP_NOISE_LEVELS=0,0.1,0.2,0.5,1.0,2.0,5.0,10.0,20.0,50.0
-export DP_ATTACK_TYPE=composite
-export COMPOSITE_ATTACK_TYPES=bracket_greedy,json_greedy
+export BATCH_SIZE=32
+export MAX_LENGTH=512
+export ATTACK_BATCH_SIZE=32
+export ATTACK_TYPES=all
 
 source ${REAL_HOME}/miniconda3/etc/profile.d/conda.sh
 conda activate my_environment

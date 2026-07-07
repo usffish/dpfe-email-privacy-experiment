@@ -81,7 +81,7 @@ for _k in list(_os.environ.keys()):
 del _os, _k
 ```
 
-On the USF CIRCE cluster, the system automatically sets some environment variables that point to a storage location called `/work_bgfs`. Compute nodes (the machines that actually run training) can't access that storage, and some libraries crash trying to read it before our code even starts. This loop finds and deletes those variables first.
+On the USF CIRCE cluster, the system automatically sets some environment variables that point to `/work_bgfs` storage paths. Some libraries crash trying to read those paths before our code even starts. This loop clears those stale variable values at import time; the sbatch scripts then re-export the correct `/work_bgfs` paths (like `HF_HOME`) after the environment is sanitized.
 
 ```python
 from transformers import AutoTokenizer, AutoModelForCausalLM, get_linear_schedule_with_warmup
@@ -271,7 +271,7 @@ cosine) brings it back down — this stabilizes early training and avoids oversh
 
 ### load_checkpoint()
 
-If `results/<output_dir>/model_checkpoint/` already exists from a previous run, the model is loaded from disk instead of retrained. This lets a 36-hour `slurm/run_attacks.sbatch` job be re-submitted after hitting the SLURM time limit and pick up at the attack phase instead of retraining from scratch.
+If `results/<output_dir>/model_checkpoint/` already exists from a previous run, the model is loaded from disk instead of retrained. This lets a job be re-submitted after hitting the SLURM time limit and pick up at the attack phase instead of retraining from scratch. All results live under `/work_bgfs/i/ismailj/dpfe-email-privacy-experiment/results/` so they persist across job submissions.
 
 ---
 

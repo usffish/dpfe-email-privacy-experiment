@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=dpfe-comp-gpt2l
+#SBATCH --job-name=dpfe-attacks-gpt2l
 #SBATCH --output=/work_bgfs/i/ismailj/logs/%j.out
 #SBATCH --error=/work_bgfs/i/ismailj/logs/%j.err
 #SBATCH --partition=muma_2021
@@ -7,14 +7,16 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64G
-#SBATCH --time=120:00:00
+#SBATCH --time=48:00:00
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=ismailj@usf.edu
 
-# Composite-attack DP-SGD noise sweep for GPT-2 Large (774M).
-# Unions hits across bracket_greedy and json_greedy at each sigma level.
+# Multi-attack-type experiment for GPT-2 Large (774M) — no DP noise.
+# Trains once using gpt2-large-hpo-v2 best config (Trial #32, val_loss=2.1984),
+# then runs all 15 attack strategies to compare effectiveness.
+# Note: max_length=256 (OOM at 512 with batch_size>=8 for 774M model).
 # Submit from: /work_bgfs/i/ismailj/dpfe-email-privacy-experiment
-#   sbatch slurm/run_composite_sweep_gpt2_large.sbatch
+#   sbatch slurm/run_attacks_gpt2_large.sbatch
 
 REAL_HOME=/home/i/ismailj
 WORKDIR=/work_bgfs/i/ismailj/dpfe-email-privacy-experiment
@@ -37,7 +39,7 @@ export GRAD_ACCUM_STEPS=2
 
 export USE_LORA=0
 export MODEL_NAME=gpt2-large
-export OUTPUT_DIR=results/gpt2-large-composite-sweep
+export OUTPUT_DIR=results/gpt2-large-attacks
 export MAX_EMAILS=50000
 export EPOCHS=3
 export SUBSET_PAIRS=3238
@@ -45,10 +47,7 @@ export MAX_NEW_TOKENS=100
 export BATCH_SIZE=4
 export MAX_LENGTH=256
 export ATTACK_BATCH_SIZE=16
-
-export DP_NOISE_LEVELS=0,0.1,0.2,0.5,1.0,2.0,5.0,10.0,20.0,50.0
-export DP_ATTACK_TYPE=composite
-export COMPOSITE_ATTACK_TYPES=bracket_greedy,json_greedy
+export ATTACK_TYPES=all
 
 source ${REAL_HOME}/miniconda3/etc/profile.d/conda.sh
 conda activate my_environment

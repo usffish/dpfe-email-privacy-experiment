@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=dpfe-attacks
-#SBATCH --output=/home/i/ismailj/dpfe-email-privacy-experiment/logs/%j.out
-#SBATCH --error=/home/i/ismailj/dpfe-email-privacy-experiment/logs/%j.err
+#SBATCH --output=/work_bgfs/i/ismailj/logs/%j.out
+#SBATCH --error=/work_bgfs/i/ismailj/logs/%j.err
 #SBATCH --partition=muma_2021
 #SBATCH --qos=muma21
 #SBATCH --gres=gpu:1
@@ -15,28 +15,29 @@
 # Trains GPT-Neo-125M once (gpt-neo-hpo-v3 best config), then runs all attack
 # strategies to compare effectiveness. The independent variable is the attack
 # method; the model/config below is fixed from HPO and not itself compared.
+# Submit from: /work_bgfs/i/ismailj/dpfe-email-privacy-experiment
+#   sbatch slurm/run_attacks.sbatch
 
 REAL_HOME=/home/i/ismailj
-CONDA_ENV=${REAL_HOME}/miniconda3/envs/my_environment
-WORKDIR=${REAL_HOME}/dpfe-email-privacy-experiment
+WORKDIR=/work_bgfs/i/ismailj/dpfe-email-privacy-experiment
 
-export HF_HOME=${REAL_HOME}/hf_cache
+export HF_HOME=/work_bgfs/i/ismailj/hf_cache
 export TRANSFORMERS_OFFLINE=1
 export TOKENIZERS_PARALLELISM=false
 export PYTHONUNBUFFERED=1
 
 export FRESH=0          # set to 1 to wipe OUTPUT_DIR and start clean
-export SMOKE=0          # set to 1 for a fast ~15 min smoke test
-export GRAD_ACCUM_STEPS=2
+export SMOKE=0          # set to 1 for a fast sanity check (~15 min)
+
 # gpt-neo-hpo-v3 best config (trial #0, val_loss=2.2322) — see README
 export LEARNING_RATE=1.32e-05
 export LR_SCHEDULE=linear
 export WEIGHT_DECAY=0.0729
 export WARMUP_FRACTION=0.0166
+export GRAD_ACCUM_STEPS=2
+export MAX_GRAD_NORM=2.78
 export ATTACK_BATCH_SIZE=32
-export LORA_R=64
-export LORA_ALPHA=128
-export USE_LORA=0       # full fine-tuning on RTX A6000 (48 GB VRAM)
+export USE_LORA=0
 export MODEL_NAME=EleutherAI/gpt-neo-125M
 export OUTPUT_DIR=results/gpt-neo-125m-v3-attacks
 export MAX_EMAILS=50000
@@ -45,10 +46,6 @@ export SUBSET_PAIRS=3238
 export MAX_NEW_TOKENS=100
 export BATCH_SIZE=32
 export MAX_LENGTH=512
-export MAX_GRAD_NORM=2.78
-# ATTACK_TYPES: "all" runs all 15 default types (excludes context_* by default).
-# Set to a comma-separated list to run a subset, e.g. "zs_d_greedy,fs_5_greedy".
-# Include "context_50,context_100,context_200" explicitly to run context attacks.
 export ATTACK_TYPES=all
 
 source ${REAL_HOME}/miniconda3/etc/profile.d/conda.sh
@@ -57,11 +54,8 @@ conda activate my_environment
 echo "Job ID: ${SLURM_JOB_ID}"
 echo "Node:   ${SLURMD_NODENAME}"
 echo "GPU:    $(nvidia-smi --query-gpu=name --format=csv,noheader)"
-echo "HOME:   ${HOME}  REAL_HOME: ${REAL_HOME}"
-echo "CONDA_PREFIX: ${CONDA_PREFIX}"
 echo "Start:  $(date)"
 
-mkdir -p "${WORKDIR}/logs"
 cd "${WORKDIR}"
 python -u main.py
 

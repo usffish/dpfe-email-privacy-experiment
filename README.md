@@ -266,7 +266,7 @@ sbatch slurm/run_composite_sweep_gpt2_base.sbatch
 sbatch slurm/run_composite_sweep_gpt2_large.sbatch
 ```
 
-All sweep scripts support **resume** — restarting skips completed σ levels. Results are pushed to GitHub after each σ level via the GitHub API (`GITHUB_TOKEN` env var).
+All sweep scripts support **resume** — restarting with `FRESH=0` skips completed σ levels automatically.
 
 ### Compare results
 
@@ -314,13 +314,6 @@ All hyperparameters are set via environment variables in the sbatch scripts.
 | `DP_ATTACK_TYPE` | `zs_d_greedy` | Attack type used during noise sweep |
 | `COMPOSITE_ATTACK_TYPES` | unset | Comma-separated attacks to union in composite sweep |
 
-### GitHub persistence (noise sweep)
-| Variable | Description |
-|---|---|
-| `GITHUB_TOKEN` | PAT for pushing results after each σ level |
-| `GITHUB_REPO` | Repository (default: `usffish/dpfe-email-privacy-experiment`) |
-| `GITHUB_BRANCH` | Branch to push to (default: `attack`) |
-
 ---
 
 ## CIRCE Setup
@@ -333,22 +326,29 @@ All hyperparameters are set via environment variables in the sbatch scripts.
 | GPU | NVIDIA RTX A6000 (48 GB) |
 | Python env | Conda: `my_environment` (Python 3.11) |
 
-### Storage workaround
+### Storage layout
 
-CIRCE's `/home` filesystem (22TB shared across all users) periodically fills to 100% capacity. All sbatch scripts use a **`/tmp`-first** approach:
+CIRCE's `/home` filesystem is at 100% capacity (22TB shared, per-user quota ~17GB). All jobs run from `/work_bgfs` (BeeGFS, 2TB personal quota, fast parallel I/O):
 
-- Clone fresh code from GitHub into compute-node `/tmp` (each job gets ~196GB free)
-- Read training data and conda env from `/home` (reads work even when full)
-- Write checkpoints and HF model cache to `/tmp`
-- Push results JSON to GitHub after each σ level via API
+| Path | Purpose |
+|---|---|
+| `/work_bgfs/i/ismailj/dpfe-email-privacy-experiment/` | Code + results (WORKDIR) |
+| `/work_bgfs/i/ismailj/hf_cache/` | HuggingFace model cache (pre-downloaded) |
+| `/work_bgfs/i/ismailj/logs/` | SLURM stdout/stderr logs |
+| `/home/i/ismailj/miniconda3/` | Conda env (read-only from jobs) |
 
-This makes jobs resilient to `/home` filling mid-run. The GitHub push is the source of truth for resume state.
+All sbatch scripts set `TRANSFORMERS_OFFLINE=1` so no internet access is needed on compute nodes.
+
+To submit a job, SSH to CIRCE and run from the WORKDIR:
+```bash
+cd /work_bgfs/i/ismailj/dpfe-email-privacy-experiment
+sbatch slurm/run_attacks.sbatch
+```
 
 ### Notes
 - **`muma_2021` requires `--qos=muma21`** — all sbatch scripts already set this
 - **SQLite fails on NFS** — HPO study uses `JournalFileBackend` (NFS-safe append-only writes)
 - **GCC 4.8.2 on compute nodes** — install greenlet with `pip install greenlet --only-binary=:all:`
-- **`/work_bgfs`** — 2TB quota allocated but directory permissions require RC ticket to fix
 
 ---
 
@@ -373,7 +373,10 @@ This makes jobs resilient to `/home` filling mid-run. The GitHub push is the sou
 │   ├── run_composite_sweep_gpt2_large.sbatch  # GPT-2 Large, composite noise sweep
 │   ├── run_noise_sweep_gpt2_large.sbatch      # GPT-2 Large, single-attack noise sweep
 │   ├── run_composite_sweep_1.3b.sbatch        # GPT-Neo 1.3B, composite noise sweep
-│   ├── smoke_workaround.sh                    # End-to-end smoke test (4h, /tmp workaround)
+│   ├── smoke_workaround.sh                    # End-to-end smoke test (~15 min on GPU)
+│   ├── run_attacks_gpt2_base.sbatch           # GPT-2 Base, 15 attacks
+│   ├── run_attacks_gpt2_large.sbatch          # GPT-2 Large, 15 attacks
+│   ├── run_noise_sweep_gpt2_base.sbatch       # GPT-2 Base, single-attack noise sweep
 │   ├── run_hpo_gptneo.sbatch            # HPO trial: GPT-Neo 125M
 │   └── run_hpo_gptneo_1.3b.sbatch       # HPO trial: GPT-Neo 1.3B
 ├── docs/
