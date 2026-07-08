@@ -26,7 +26,7 @@ Runs on the USF CIRCE cluster's `muma_2021` partition (RTX A6000, 48 GB VRAM).
 For each σ ∈ {0, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0}:
 - Fine-tune a fresh model with that noise level
 - Run the best attack(s) — single best or composite union
-- Record hits, ASR, val loss, perplexity
+- Record hits and ASR
 
 ---
 
@@ -195,22 +195,22 @@ Union across all 15 attacks: **15 unique addresses recovered**.
 
 ### DP-SGD Noise Sweep — GPT-Neo 125M (σ = 0 to 50, composite attack)
 
-Composite adversary (union of 6 attack types). Val loss and perplexity track model degradation.
+Composite adversary (union of 6 attack types).
 
-| σ | Hits | ASR | Val Loss | Perplexity | Privacy Enh. |
-|---|---|---|---|---|---|
-| 0.0 | 15 | 0.512% | 2.49 | 12.0 | 0% (baseline) |
-| 0.1 | 5 | 0.171% | 3.31 | 27.4 | 67% |
-| 0.2 | 6 | 0.205% | 3.47 | 32.2 | 60% |
-| 0.5 | 7 | 0.239% | 3.65 | 38.6 | 53% |
-| 1.0 | 7 | 0.239% | 3.77 | 43.3 | 53% |
-| 2.0 | 5 | 0.171% | 3.85 | 47.1 | 67% |
-| 5.0 | 8 | 0.273% | 3.92 | 50.5 | 47% |
-| 10.0 | 6 | 0.205% | 3.96 | 52.3 | 60% |
-| 20.0 | 8 | 0.273% | 3.97 | 53.0 | 47% |
-| 50.0 | 6 | 0.205% | 3.96 | 52.3 | 60% |
+| σ | Hits | ASR | Privacy Enh. |
+|---|---|---|---|
+| 0.0 | 15 | 0.512% | 0% (baseline) |
+| 0.1 | 5 | 0.171% | 67% |
+| 0.2 | 6 | 0.205% | 60% |
+| 0.5 | 7 | 0.239% | 53% |
+| 1.0 | 7 | 0.239% | 53% |
+| 2.0 | 5 | 0.171% | 67% |
+| 5.0 | 8 | 0.273% | 47% |
+| 10.0 | 6 | 0.205% | 60% |
+| 20.0 | 8 | 0.273% | 47% |
+| 50.0 | 6 | 0.205% | 60% |
 
-**Key finding**: No zero-hit noise level exists within σ=0–50. Val loss plateaus at ~3.97 beyond σ=5 (model fully degraded, perplexity ~52), yet the composite attacker still recovers 5–8 addresses at every noise level. The non-monotone pattern (σ=5 recovers more than σ=1) suggests stochastic noise occasionally aids extraction.
+**Key finding**: No zero-hit noise level exists within σ=0–50. The composite attacker still recovers 5–8 addresses at every noise level even as the model fully degrades under high noise. The non-monotone pattern (σ=5 recovers more than σ=1) suggests stochastic noise occasionally aids extraction.
 
 ---
 
@@ -268,39 +268,39 @@ The 1.3B sweep is the most informative: highest baseline ASR and complete across
 
 ### DP-SGD Noise Sweep — GPT-2 Base (σ = 0 to 50, single attack: bracket_greedy)
 
-| σ | Hits | ASR | Val Loss | Privacy Enh. |
-|---|---|---|---|---|
-| 0.0 | 10 | 0.341% | 2.549 | 0% (baseline) |
-| 0.1 | 0 | 0.000% | 3.660 | **100%** |
-| 0.2 | 0 | 0.000% | 4.037 | 100% |
-| 0.5 | 0 | 0.000% | 4.584 | 100% |
-| 1.0 | 0 | 0.000% | 4.988 | 100% |
-| 2.0 | 1 | 0.034% | 5.414 | 90% |
-| 5.0 | 0 | 0.000% | 5.712 | 100% |
-| 10.0 | 1 | 0.034% | 6.005 | 90% |
-| 20.0 | 0 | 0.000% | 6.190 | 100% |
-| 50.0 | 0 | 0.000% | 6.222 | 100% |
+| σ | Hits | ASR | Privacy Enh. |
+|---|---|---|---|
+| 0.0 | 10 | 0.341% | 0% (baseline) |
+| 0.1 | 0 | 0.000% | **100%** |
+| 0.2 | 0 | 0.000% | 100% |
+| 0.5 | 0 | 0.000% | 100% |
+| 1.0 | 0 | 0.000% | 100% |
+| 2.0 | 1 | 0.034% | 90% |
+| 5.0 | 0 | 0.000% | 100% |
+| 10.0 | 1 | 0.034% | 90% |
+| 20.0 | 0 | 0.000% | 100% |
+| 50.0 | 0 | 0.000% | 100% |
 
-**Key finding**: GPT-2 Base reaches zero hits at σ=0.1 — a much lower suppression threshold than GPT-Neo models. The occasional stray hit at σ=2 and σ=10 appears to be noise-induced coincidence (1 hit out of 3,238 pairs). Val loss climbs continuously (2.55 → 6.22), indicating the model degrades much more severely than GPT-Neo under DP-SGD noise.
+**Key finding**: GPT-2 Base reaches zero hits at σ=0.1 — a much lower suppression threshold than GPT-Neo models. The occasional stray hit at σ=2 and σ=10 appears to be noise-induced coincidence (1 hit out of 3,238 pairs).
 
 ---
 
 ### DP-SGD Noise Sweep — GPT-Neo 1.3B (σ = 0 to 50, single attack: zs_d_beam5)
 
-| σ | Hits | ASR | Val Loss | Privacy Enh. |
-|---|---|---|---|---|
-| 0.0 | 23 | 0.785% | 1.984 | 0% (baseline) |
-| 0.1 | 12 | 0.410% | 3.241 | 48% |
-| 0.2 | 14 | 0.478% | 3.501 | 39% |
-| 0.5 | 13 | 0.444% | 3.784 | 44% |
-| 1.0 | 13 | 0.444% | 3.885 | 44% |
-| 2.0 | 14 | 0.478% | 3.937 | 39% |
-| 5.0 | 14 | 0.478% | 3.961 | 39% |
-| 10.0 | 13 | 0.444% | 3.974 | 44% |
-| 20.0 | 15 | 0.512% | 3.977 | 35% |
-| 50.0 | 13 | 0.444% | 3.977 | 44% |
+| σ | Hits | ASR | Privacy Enh. |
+|---|---|---|---|
+| 0.0 | 23 | 0.785% | 0% (baseline) |
+| 0.1 | 12 | 0.410% | 48% |
+| 0.2 | 14 | 0.478% | 39% |
+| 0.5 | 13 | 0.444% | 44% |
+| 1.0 | 13 | 0.444% | 44% |
+| 2.0 | 14 | 0.478% | 39% |
+| 5.0 | 14 | 0.478% | 39% |
+| 10.0 | 13 | 0.444% | 44% |
+| 20.0 | 15 | 0.512% | 35% |
+| 50.0 | 13 | 0.444% | 44% |
 
-**Key finding**: GPT-Neo 1.3B never reaches zero — even at σ=50 the attacker recovers 13 addresses. Val loss plateaus at ~3.98 beyond σ=5 (model destroyed) but memorization persists. The 1.3B model's deep memorization makes it both the best attack target and the hardest to protect with DP-SGD alone.
+**Key finding**: GPT-Neo 1.3B never reaches zero — even at σ=50 the attacker recovers 13 addresses. The 1.3B model's deep memorization makes it both the best attack target and the hardest to protect with DP-SGD alone.
 
 ---
 
