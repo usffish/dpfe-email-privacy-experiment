@@ -4,14 +4,20 @@
 # Submit from: /work_bgfs/i/ismailj/dpfe-email-privacy-experiment
 #   sbatch --partition=muma_2021 --qos=muma21 --gres=gpu:1 --cpus-per-task=2 \
 #     --mem=16G --time=01:00:00 --job-name=dpfe-smoke \
-#     --output=/work_bgfs/i/ismailj/logs/%j.out \
-#     --error=/work_bgfs/i/ismailj/logs/%j.err \
+#     --output=/home/i/ismailj/logs/%j.out \
+#     --error=/home/i/ismailj/logs/%j.err \
 #     slurm/smoke_workaround.sh
 
 REAL_HOME=/home/i/ismailj
-WORKDIR=/work_bgfs/i/ismailj/dpfe-email-privacy-experiment
+STORE=/work_bgfs/i/ismailj
+TMPDIR=/tmp/dpfe-${SLURM_JOB_ID}
+WORKDIR=${TMPDIR}/dpfe-email-privacy-experiment
 
-export HF_HOME=/work_bgfs/i/ismailj/hf_cache
+# Copy code and model cache to local /tmp (work_bgfs not accessible on compute nodes)
+mkdir -p "${TMPDIR}"
+cp -r ${STORE}/dpfe-email-privacy-experiment "${TMPDIR}/"
+export HF_HOME=${TMPDIR}/hf_cache
+cp -r ${STORE}/hf_cache "${HF_HOME}"
 export TRANSFORMERS_OFFLINE=1
 export TOKENIZERS_PARALLELISM=false
 export PYTHONUNBUFFERED=1

@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=dpfe-attacks-1.3b
-#SBATCH --output=/work_bgfs/i/ismailj/logs/%j.out
-#SBATCH --error=/work_bgfs/i/ismailj/logs/%j.err
+#SBATCH --output=/home/i/ismailj/logs/%j.out
+#SBATCH --error=/home/i/ismailj/logs/%j.err
 #SBATCH --partition=muma_2021
 #SBATCH --qos=muma21
 #SBATCH --gres=gpu:1
@@ -18,9 +18,15 @@
 #   sbatch slurm/run_attacks_1.3b.sbatch
 
 REAL_HOME=/home/i/ismailj
-WORKDIR=/work_bgfs/i/ismailj/dpfe-email-privacy-experiment
+STORE=/work_bgfs/i/ismailj
+TMPDIR=/tmp/dpfe-${SLURM_JOB_ID}
+WORKDIR=${TMPDIR}/dpfe-email-privacy-experiment
 
-export HF_HOME=/work_bgfs/i/ismailj/hf_cache
+# Copy code and model cache to local /tmp (work_bgfs not accessible on compute nodes)
+mkdir -p "${TMPDIR}"
+cp -r ${STORE}/dpfe-email-privacy-experiment "${TMPDIR}/"
+export HF_HOME=${TMPDIR}/hf_cache
+cp -r ${STORE}/hf_cache "${HF_HOME}"
 export TRANSFORMERS_OFFLINE=1
 export TOKENIZERS_PARALLELISM=false
 export PYTHONUNBUFFERED=1
@@ -59,4 +65,10 @@ echo "Start:  $(date)"
 cd "${WORKDIR}"
 python -u main.py
 
+# Copy results back to persistent storage
+RESULT_NAME=$(basename "${OUTPUT_DIR}")
+mkdir -p "${STORE}/dpfe-email-privacy-experiment/results"
+cp -r "${WORKDIR}/${OUTPUT_DIR}" "${STORE}/dpfe-email-privacy-experiment/results/${RESULT_NAME}"
+
+echo "Results copied to ${STORE}/dpfe-email-privacy-experiment/results/${RESULT_NAME}"
 echo "End: $(date)"
